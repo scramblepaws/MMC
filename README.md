@@ -91,6 +91,22 @@ password can be left empty for accounts that sign in with the browser.
   browser for that.
 - Search looks in the mail that was loaded, not on the server.
 
+## When the master password is lost
+
+A vault can have a **recovery passphrase**: a code in six groups of five
+letters that MMC shows once, when the vault is made, and that the user writes
+down. With it the vault opens again and the master password can be set to
+something new. It is as powerful as the master password, so it belongs in a
+safe place, not on a sticky note next to the screen.
+
+MMC asks for one when a vault is created, and it can be set or replaced later
+in **Settings → Recovery**.
+
+A vault that was made without a recovery passphrase cannot be reset. The
+accounts are encrypted with a key that only the master password reaches, and
+there is no way around that, which is exactly why the passphrase is worth
+setting up.
+
 ## What the program looks like
 
 - **Accounts** on the left, with a coloured letter for the provider, the

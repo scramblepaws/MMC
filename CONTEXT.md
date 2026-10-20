@@ -26,6 +26,12 @@ The password that unlocks a vault. It is never stored and cannot be
 recovered.
 _Avoid_: Key, Passphrase
 
+**Recovery Passphrase**:
+A code that unlocks a vault when the master password is lost. It is handed
+out once, when the vault is made, and the user writes it down. It is as
+powerful as the master password.
+_Avoid_: Backup code, Emergency key, Secret
+
 **Unified Inbox**:
 The single list that shows the mail of every mailbox at once, with the
 mailbox each message came from on it.

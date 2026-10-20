@@ -2,8 +2,12 @@
 
 #include "core/Vault.h"
 
+#include <QApplication>
+#include <QClipboard>
 #include <QDialogButtonBox>
 #include <QFileDialog>
+#include <QFileInfo>
+#include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -70,7 +74,7 @@ void VaultChooserDialog::onNewVault()
     if (path.isEmpty())
         return;
 
-    MasterPasswordDialog dialog(tr("Choose a master password"), true, this);
+    MasterPasswordDialog dialog(tr("Choose a master password"), true);
     if (dialog.exec() != QDialog::Accepted)
         return;
 
@@ -80,6 +84,23 @@ void VaultChooserDialog::onNewVault()
         QMessageBox::critical(this, tr("Could not create the vault"), error);
         return;
     }
+
+    // A recovery passphrase, so the vault can be opened again when the master
+    // password is lost.
+    if (QMessageBox::question(this, tr("A way back in"),
+                               tr("Set up a recovery passphrase?\n\n"
+                                  "It is a code you write down. With it the vault can be opened "
+                                  "again when the master password is forgotten. Without it the "
+                                  "accounts are gone for good."))
+        == QMessageBox::Yes) {
+        const QString passphrase = Vault::makeRecoveryPassphrase();
+        RecoverySetupDialog setup(passphrase, this);
+        setup.exec();
+        if (!vault.createRecovery(passphrase, &error)) {
+            QMessageBox::warning(this, tr("Could not set up the recovery passphrase"), error);
+        }
+    }
+
     m_selectedPath = path;
     m_createdPassword = dialog.password();
     accept();
@@ -103,8 +124,9 @@ void VaultChooserDialog::onOpen()
     accept();
 }
 
-MasterPasswordDialog::MasterPasswordDialog(const QString& title, bool confirm, QWidget* parent)
-    : QDialog(parent), m_askConfirm(confirm)
+MasterPasswordDialog::MasterPasswordDialog(const QString& title, bool confirm,
+                                           const QString& vaultPath, QWidget* parent)
+    : QDialog(parent), m_askConfirm(confirm), m_vaultPath(vaultPath)
 {
     setWindowTitle(title);
     auto* layout = new QVBoxLayout(this);
@@ -116,7 +138,7 @@ MasterPasswordDialog::MasterPasswordDialog(const QString& title, bool confirm, Q
     m_password->setPlaceholderText(tr("Master password"));
     layout->addWidget(m_password);
 
-    if (m_askConfirm) {
+    if (confirm) {
         m_confirmField = new QLineEdit(this);
         m_confirmField->setEchoMode(QLineEdit::Password);
         m_confirmField->setPlaceholderText(tr("Repeat the password"));
@@ -124,6 +146,14 @@ MasterPasswordDialog::MasterPasswordDialog(const QString& title, bool confirm, Q
     }
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+
+    // The way back in, when the master password is lost.
+    if (!m_vaultPath.isEmpty()) {
+        auto* forgot = buttons->addButton(tr("Forgot the master password?"),
+                                          QDialogButtonBox::ActionRole);
+        connect(forgot, &QPushButton::clicked, this, &MasterPasswordDialog::onForgotPassword);
+    }
+
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, this, [this]() {
         if (m_password->text().isEmpty()) {
@@ -141,9 +171,120 @@ MasterPasswordDialog::MasterPasswordDialog(const QString& title, bool confirm, Q
     m_password->setFocus();
 }
 
+void MasterPasswordDialog::onForgotPassword()
+{
+    if (!Vault::vaultHasRecovery(m_vaultPath)) {
+        QMessageBox::information(
+            this, tr("No way back in"),
+            tr("This vault was made without a recovery passphrase, so the master password "
+               "cannot be reset. The accounts are locked behind it.\n\n"
+               "The next vault you make can have one, MMC asks for it when you create it."));
+        return;
+    }
+
+    ResetPasswordDialog reset(m_vaultPath, this);
+    if (reset.exec() != QDialog::Accepted)
+        return;
+    m_resetPassword = reset.newPassword();
+    m_password->setText(m_resetPassword);
+    accept();
+}
+
 QString MasterPasswordDialog::password() const
 {
     return m_password->text();
+}
+
+RecoverySetupDialog::RecoverySetupDialog(const QString& passphrase, QWidget* parent)
+    : QDialog(parent)
+{
+    setWindowTitle(tr("Your recovery passphrase"));
+    resize(520, 240);
+
+    auto* layout = new QVBoxLayout(this);
+    layout->addWidget(new QLabel(tr("Write this down and keep it somewhere safe. It is the only "
+                                     "way into the vault when the master password is "
+                                     "forgotten."), this));
+
+    auto* field = new QLineEdit(passphrase, this);
+    field->setReadOnly(true);
+    field->setFont(QFont(QStringLiteral("Consolas"), 12));
+    layout->addWidget(field);
+
+    auto* copyButton = new QPushButton(tr("Copy to the clipboard"), this);
+    layout->addWidget(copyButton);
+    connect(copyButton, &QPushButton::clicked, this, [field]() {
+        QApplication::clipboard()->setText(field->text());
+    });
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok, this);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("I wrote it down"));
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+}
+
+ResetPasswordDialog::ResetPasswordDialog(const QString& vaultPath, QWidget* parent)
+    : QDialog(parent), m_vaultPath(vaultPath)
+{
+    setWindowTitle(tr("Open the vault with the recovery passphrase"));
+    resize(520, 320);
+
+    auto* layout = new QVBoxLayout(this);
+    layout->addWidget(new QLabel(tr("Type the recovery passphrase of this vault and choose a new "
+                                     "master password."), this));
+
+    auto* form = new QFormLayout();
+    layout->addLayout(form);
+
+    m_recovery = new QLineEdit(this);
+    m_recovery->setPlaceholderText(tr("Recovery passphrase"));
+    m_recovery->setFont(QFont(QStringLiteral("Consolas"), 10));
+    form->addRow(tr("Recovery passphrase"), m_recovery);
+
+    m_password = new QLineEdit(this);
+    m_password->setEchoMode(QLineEdit::Password);
+    m_password->setPlaceholderText(tr("New master password"));
+    form->addRow(tr("New master password"), m_password);
+
+    m_confirmField = new QLineEdit(this);
+    m_confirmField->setEchoMode(QLineEdit::Password);
+    m_confirmField->setPlaceholderText(tr("Repeat the password"));
+    form->addRow(tr("Repeat it"), m_confirmField);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Open the vault"));
+    layout->addWidget(buttons);
+
+    connect(buttons, &QDialogButtonBox::accepted, this, &ResetPasswordDialog::onAccept);
+    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    m_recovery->setFocus();
+}
+
+void ResetPasswordDialog::onAccept()
+{
+    if (m_recovery->text().trimmed().isEmpty()) {
+        QMessageBox::warning(this, tr("No passphrase"),
+                             tr("Type the recovery passphrase of the vault."));
+        return;
+    }
+    if (m_password->text().isEmpty()) {
+        QMessageBox::warning(this, tr("No password"),
+                             tr("Choose a new master password."));
+        return;
+    }
+    if (m_password->text() != m_confirmField->text()) {
+        QMessageBox::warning(this, tr("Not the same"),
+                             tr("The two passwords are not the same."));
+        return;
+    }
+
+    QString error;
+    if (!Vault::resetMasterPassword(m_vaultPath, m_recovery->text(), m_password->text(), &error)) {
+        QMessageBox::warning(this, tr("Could not open the vault"), error);
+        return;
+    }
+    m_newPassword = m_password->text();
+    accept();
 }
 
 } // namespace mmc

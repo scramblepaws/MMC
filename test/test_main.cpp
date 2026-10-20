@@ -102,7 +102,17 @@ int main(int argc, char** argv)
             std::printf("%s\n", qPrintable(error));
             return 1;
         }
+
+        // The demo vault gets a recovery passphrase, so the way back in can
+        // be tried out.
+        const QString recovery = QStringLiteral("DEMO RECOVERY PASSPHRASE 12345");
+        if (!vault.createRecovery(recovery, &error)) {
+            std::printf("%s\n", qPrintable(error));
+            return 1;
+        }
         std::printf("demo vault written to %s\n", argv[2]);
+        std::printf("master password: %s\n", argv[3]);
+        std::printf("recovery passphrase: %s\n", qPrintable(recovery));
         return 0;
     }
 

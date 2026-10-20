@@ -42,15 +42,23 @@ int main(int argc, char* argv[])
 
     if (password.isEmpty()) {
         MasterPasswordDialog dialog(QObject::tr("Unlock %1").arg(QFileInfo(path).fileName()),
-                                     false, nullptr);
+                                     false, path, nullptr);
         if (dialog.exec() != QDialog::Accepted)
             return 0;
-        password = dialog.password();
+        password = dialog.resetPassword().isEmpty() ? dialog.password() : dialog.resetPassword();
     }
 
     QString error;
     if (!vault.open(path, password, &error)) {
-        QMessageBox::critical(nullptr, QObject::tr("Cannot open the vault"), error);
+        // The master password can be wrong, but a recovery passphrase can get
+        // in anyway.
+        if (Vault::vaultHasRecovery(path)) {
+            QMessageBox::critical(nullptr, QObject::tr("Cannot open the vault"),
+                                  QObject::tr("%1\n\nStart MMC again and use 'Forgot the master "
+                                               "password?' on the unlock screen.").arg(error));
+        } else {
+            QMessageBox::critical(nullptr, QObject::tr("Cannot open the vault"), error);
+        }
         return 1;
     }
 

@@ -1049,6 +1049,22 @@ void MainWindow::onSettings()
                                  .arg(OAuth2::redirectUriForPort(OAuth2::kDefaultLoopbackPort)),
                              &dialog));
 
+    // A way back in when the master password is lost.
+    auto* recoveryButton = new QPushButton(
+        m_vault->hasRecovery() ? tr("Replace the recovery passphrase")
+                                : tr("Set up a recovery passphrase"), &dialog);
+    recoveryButton->setToolTip(tr("A code you write down. With it the vault can be opened again "
+                                  "when the master password is forgotten."));
+    form->addRow(tr("Recovery"), recoveryButton);
+    connect(recoveryButton, &QPushButton::clicked, &dialog, [this, &dialog]() {
+        const QString passphrase = Vault::makeRecoveryPassphrase();
+        RecoverySetupDialog setup(passphrase, &dialog);
+        setup.exec();
+        QString error;
+        if (!m_vault->createRecovery(passphrase, &error))
+            QMessageBox::warning(&dialog, tr("Could not set up the recovery passphrase"), error);
+    });
+
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [this, &dialog]() {

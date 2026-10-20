@@ -90,4 +90,64 @@ void test_vault(TestRunner& runner)
     CHECK_EQ(state.tokens.size(), 0);
     CHECK_EQ(state.folders.size(), 0);
     CHECK_EQ(state.messages.size(), 0);
+
+    // --- the recovery passphrase ----------------------------------------
+    const QString passphrase = Vault::makeRecoveryPassphrase();
+    CHECK_EQ(passphrase.size(), 35);   // six groups of five with spaces
+    CHECK_EQ(Vault::normalisePassphrase(passphrase.toLower()),
+             Vault::normalisePassphrase(passphrase));
+    CHECK_EQ(Vault::normalisePassphrase(QStringLiteral("abc def")).size(), 6);
+
+    const QString recoveryPath = dir.filePath(QStringLiteral("recovery.mmcv"));
+    Vault recoveryVault;
+    CHECK(recoveryVault.create(recoveryPath, "master password", &error));
+    CHECK(!recoveryVault.hasRecovery());
+    CHECK(!Vault::vaultHasRecovery(recoveryPath));
+
+    Mailbox account;
+    account.id = QStringLiteral("id-1");
+    account.address = QStringLiteral("someone@gmail.com");
+    recoveryVault.state().mailboxes.append(account);
+    CHECK(recoveryVault.save(&error));
+
+    CHECK(recoveryVault.createRecovery(passphrase, &error));
+    CHECK(recoveryVault.hasRecovery());
+    CHECK(Vault::vaultHasRecovery(recoveryPath));
+
+    // The vault still opens with the master password.
+    Vault reopened2;
+    CHECK(reopened2.open(recoveryPath, "master password", &error));
+    CHECK(reopened2.hasRecovery());
+    CHECK_EQ(reopened2.state().mailboxes.size(), 1);
+
+    // A wrong recovery passphrase changes nothing.
+    CHECK(!Vault::resetMasterPassword(recoveryPath, "wrong passphrase",
+                                      "new master password", &error));
+    Vault stillOld;
+    CHECK(stillOld.open(recoveryPath, "master password", &error));
+
+    // With the recovery passphrase the vault opens and gets a new password.
+    CHECK(Vault::resetMasterPassword(recoveryPath, passphrase, "new master password", &error));
+    Vault afterReset;
+    CHECK(afterReset.open(recoveryPath, "new master password", &error));
+    CHECK_EQ(afterReset.state().mailboxes.size(), 1);
+    CHECK_EQ(afterReset.state().mailboxes.first().address, QStringLiteral("someone@gmail.com"));
+    CHECK(afterReset.hasRecovery());
+
+    // The old master password does not work any more.
+    Vault oldPassword;
+    CHECK(!oldPassword.open(recoveryPath, "master password", &error));
+
+    // The recovery passphrase still works after a reset.
+    CHECK(Vault::resetMasterPassword(recoveryPath, passphrase, "third password", &error));
+    Vault third;
+    CHECK(third.open(recoveryPath, "third password", &error));
+    CHECK_EQ(third.state().mailboxes.size(), 1);
+
+    // Changing the master password keeps the recovery passphrase working.
+    CHECK(third.changeMasterPassword("third password", "fourth password", &error));
+    CHECK(Vault::resetMasterPassword(recoveryPath, passphrase, "fifth password", &error));
+    Vault fifth;
+    CHECK(fifth.open(recoveryPath, "fifth password", &error));
+    CHECK_EQ(fifth.state().mailboxes.size(), 1);
 }

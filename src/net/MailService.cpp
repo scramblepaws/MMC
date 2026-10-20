@@ -335,7 +335,7 @@ void MailService::fetchBody(const QString& messageId)
         const QByteArray raw = watcher->result();
         watcher->deleteLater();
         if (raw.isEmpty()) {
-            emit logMessage(QObject::tr("Could not download the message."));
+            emit bodyFailed(messageId, tr("The message could not be downloaded."));
             return;
         }
         emit bodyReady(messageId, raw);

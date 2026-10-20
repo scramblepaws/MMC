@@ -91,6 +91,24 @@ password can be left empty for accounts that sign in with the browser.
   browser for that.
 - Search looks in the mail that was loaded, not on the server.
 
+## What the program looks like
+
+- **Accounts** on the left, with a coloured letter for the provider, the
+  number of unread messages and a mark for an account that is on cooldown.
+  The filter box narrows the list down, **All accounts** at the top shows the
+  mail of every account in one list.
+- **The mail** in the middle, newest first, unread subjects in bold, the
+  account each message came from in the colour of its provider. Click a
+  column heading to sort.
+- **The message** on the right, with the sender, the recipient and the date
+  above the text.
+- Keyboard: `Ctrl+R` refresh all, `F5` refresh the account that is picked,
+  `Ctrl+N` new message, `Ctrl+F` search.
+
+Right click an account for **Sign in again**, **Open webmail** and
+**Remove account**. The settings of an account, including the cooldown
+note, are under **More options** in the account dialog.
+
 ## Layout
 
 ```

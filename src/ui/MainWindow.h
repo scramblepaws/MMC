@@ -13,6 +13,7 @@ class QTextBrowser;
 class QLineEdit;
 class QLabel;
 class QListWidgetItem;
+class QStackedWidget;
 
 namespace mmc {
 
@@ -32,19 +33,22 @@ private slots:
     void onRemoveAccount();
     void onSignInAgain();
     void onAccountMenu();
+    void onAccountFilterChanged();
+    void onAccountSelectionChanged();
     void onImportAccounts();
     void onRefreshAll();
     void onRefreshAccount();
     void onSyncFinished(const QString& mailboxId, bool ok, const QString& error);
     void onMessageSelectionChanged();
     void onBodyReady(const QString& messageId, const QByteArray& raw);
+    void onBodyFailed(const QString& messageId, const QString& error);
     void onCompose();
     void onSendFinished(bool ok, const QString& error);
     void onSearch();
     void onOpenWebmail();
     void onSettings();
     void onSaveAttachment();
-    void onAccountSelectionChanged();
+    void onSortColumn(int column);
 
 private:
     void buildUi();
@@ -62,7 +66,11 @@ private:
     MailService* m_service = nullptr;
 
     QListWidget* m_accounts = nullptr;
+    QLineEdit* m_accountFilter = nullptr;
+    QStackedWidget* m_messageArea = nullptr;
     QTableWidget* m_messages = nullptr;
+    QLabel* m_messageHint = nullptr;
+    QLabel* m_readerHeader = nullptr;
     QTextBrowser* m_reader = nullptr;
     QListWidget* m_attachments = nullptr;
     QLineEdit* m_search = nullptr;
@@ -71,6 +79,8 @@ private:
 
     QHash<QString, QByteArray> m_bodyCache;
     QString m_currentMessageId;
+    int m_sortColumn = 3;      // the date
+    bool m_sortAscending = false;
 };
 
 } // namespace mmc

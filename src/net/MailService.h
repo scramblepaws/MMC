@@ -41,6 +41,7 @@ signals:
     void syncStarted(const QString& mailboxId);
     void syncFinished(const QString& mailboxId, bool ok, const QString& error);
     void bodyReady(const QString& messageId, const QByteArray& raw);
+    void bodyFailed(const QString& messageId, const QString& error);
     void sendFinished(bool ok, const QString& error);
     void logMessage(const QString& text);
 

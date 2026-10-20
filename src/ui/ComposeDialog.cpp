@@ -1,4 +1,5 @@
 #include "ui/ComposeDialog.h"
+#include "core/ProviderIcons.h"
 
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -25,8 +26,10 @@ ComposeDialog::ComposeDialog(const QVector<Mailbox>& mailboxes, QWidget* parent)
     layout->addLayout(form);
 
     m_from = new QComboBox(this);
-    for (const Mailbox& m : mailboxes)
-        m_from->addItem(m.displayName.isEmpty() ? m.address : m.displayName, m.id);
+    for (const Mailbox& m : mailboxes) {
+        m_from->addItem(providerIcon(m.providerId, 18),
+                        m.displayName.isEmpty() ? m.address : m.displayName, m.id);
+    }
     form->addRow(tr("From"), m_from);
 
     m_to = new QLineEdit(this);

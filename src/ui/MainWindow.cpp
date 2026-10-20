@@ -7,6 +7,7 @@
 #include "net/Providers.h"
 #include "ui/ComposeDialog.h"
 #include "ui/MailboxDialog.h"
+#include "core/ProviderIcons.h"
 #include "ui/VaultDialogs.h"
 
 #include <QAction>
@@ -137,13 +138,16 @@ public:
 
         const int chipSize = 20;
         const QRect chip(rect.left() + 6, rect.center().y() - chipSize / 2, chipSize, chipSize);
-        if (isAll) {
+        const QPixmap logo = providerPixmap(providerId, chipSize - 2);
+        if (!logo.isNull()) {
+            painter->drawPixmap(chip, logo);
+        } else if (isAll) {
+            // A small envelope for the unified inbox.
             painter->setBrush(Qt::NoBrush);
             painter->setPen(QPen(QColor(0x9A, 0xA4, 0xB0), 1.5));
-            painter->drawRoundedRect(chip.adjusted(1, 1, -1, -1), 4, 4);
-            painter->setPen(QColor(0x9A, 0xA4, 0xB0));
-            painter->drawLine(chip.center().x() - 4, chip.center().y(), chip.center().x() + 4,
-                              chip.center().y());
+            painter->drawRoundedRect(chip.adjusted(1, 3, -1, -3), 3, 3);
+            painter->drawLine(chip.left() + 2, chip.top() + 4, chip.center().x(), chip.top() + 9);
+            painter->drawLine(chip.right() - 2, chip.top() + 4, chip.center().x(), chip.top() + 9);
         } else {
             painter->setPen(Qt::NoPen);
             painter->setBrush(providerColor(providerId));
@@ -174,7 +178,7 @@ public:
             const int width = metrics.horizontalAdvance(text) + 14;
             const QRect pill(rect.right() - width - 8, rect.center().y() - 9, width, 18);
             painter->setPen(Qt::NoPen);
-            painter->setBrush(isAll ? QColor(0x6E, 0x77, 0x83) : providerColor(providerId));
+            painter->setBrush(QColor(0x5A, 0x6B, 0x7D));
             painter->drawRoundedRect(pill, 9, 9);
             painter->setPen(Qt::white);
             painter->drawText(pill, Qt::AlignCenter, text);
@@ -517,8 +521,10 @@ void MainWindow::rebuildMessageList()
 
         auto* accountItem = new QTableWidgetItem(account);
         accountItem->setData(Qt::UserRole, message.id);
-        if (mailbox)
+        if (mailbox) {
+            accountItem->setIcon(providerIcon(mailbox->providerId, 16));
             accountItem->setForeground(providerColor(mailbox->providerId));
+        }
         m_messages->setItem(row, 0, accountItem);
 
         auto* fromItem = new QTableWidgetItem(senderName(message.from));

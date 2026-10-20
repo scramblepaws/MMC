@@ -19,12 +19,14 @@ add_library(mmc_core STATIC
     src/core/Crypto.cpp
     src/core/Vault.cpp
     src/core/Importer.cpp
+    src/core/ProviderIcons.cpp
     src/net/Mime.cpp
     src/net/ImapClient.cpp
     src/net/SmtpClient.cpp
     src/net/OAuth2.cpp
     src/net/Providers.cpp
     src/net/MailService.cpp
+    resources/icons.qrc
 )
 target_include_directories(mmc_core PUBLIC src)
 target_link_libraries(mmc_core PUBLIC Qt6::Core Qt6::Gui Qt6::Network Qt6::Concurrent bcrypt)
@@ -52,6 +54,7 @@ add_executable(mmc_tests
     test/test_mime.cpp
     test/test_imap.cpp
     test/test_importer.cpp
+    test/test_icons.cpp
 )
 target_link_libraries(mmc_tests PRIVATE mmc_core)
 add_test(NAME mmc_tests COMMAND mmc_tests)

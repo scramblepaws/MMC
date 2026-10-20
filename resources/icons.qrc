@@ -1,0 +1,7 @@
+<RCC>
+    <qresource prefix="/icons">
+        <file alias="gmail.png">icons/gmail.png</file>
+        <file alias="outlook.png">icons/outlook.png</file>
+        <file alias="yandex.png">icons/yandex.png</file>
+    </qresource>
+</RCC>

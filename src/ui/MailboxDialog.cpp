@@ -2,6 +2,7 @@
 
 #include "core/Vault.h"
 #include "net/Providers.h"
+#include "core/ProviderIcons.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -74,7 +75,7 @@ MailboxDialog::MailboxDialog(Vault* vault, const Mailbox& mailbox, Mode mode,
     m_provider = new QComboBox(this);
     for (const QString& id : providerIds()) {
         const Provider* provider = providerById(id);
-        m_provider->addItem(provider->name, id);
+        m_provider->addItem(providerIcon(id, 18), provider->name, id);
     }
     if (!m_mailbox.providerId.isEmpty())
         m_provider->setCurrentIndex(m_provider->findData(m_mailbox.providerId));

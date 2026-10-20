@@ -109,8 +109,8 @@ setting up.
 
 ## What the program looks like
 
-- **Accounts** on the left, with a coloured letter for the provider, the
-  number of unread messages and a mark for an account that is on cooldown.
+- **Accounts** on the left, with the logo of the provider, the number of
+  unread messages and a mark for an account that is on cooldown.
   The filter box narrows the list down, **All accounts** at the top shows the
   mail of every account in one list.
 - **The mail** in the middle, newest first, unread subjects in bold, the
@@ -135,4 +135,16 @@ test        the checks, run with ctest
 ```
 
 `CONTEXT.md` holds the vocabulary of the project, `docs/adr` the decisions
-that were worth writing down.
+that were worth writing down, `docs/ICONS.md` where the provider logos come
+from.
+
+## Looking at it without an account
+
+The test program can make a vault with made up accounts and mail, so the
+window can be looked at before anything is signed in anywhere:
+
+```
+build\bin\mmc_tests.exe --demo-vault demo.mmcv demo
+```
+
+It prints the master password it used, and a recovery passphrase.

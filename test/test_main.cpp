@@ -1,5 +1,7 @@
 #include <QCoreApplication>
+#include <QDataStream>
 #include <QDateTime>
+#include <QFile>
 #include <QUuid>
 #include <cstdio>
 
@@ -11,6 +13,7 @@ void test_vault(TestRunner& runner);
 void test_mime(TestRunner& runner);
 void test_importer(TestRunner& runner);
 void test_imap(TestRunner& runner);
+void test_icons(TestRunner& runner);
 
 int main(int argc, char** argv)
 {
@@ -116,7 +119,68 @@ int main(int argc, char** argv)
         return 0;
     }
 
+    // Check whether a vault opens with a password.
+    if (argc >= 4 && QString::fromLatin1(argv[1]) == QLatin1String("--check-vault")) {
+        mmc::Vault vault;
+        QString error;
+        const bool ok = vault.open(QString::fromLocal8Bit(argv[2]),
+                                   QString::fromLocal8Bit(argv[3]), &error);
+        std::printf("open: %s %s\n", ok ? "yes" : "no", qPrintable(error));
+        std::printf("recovery: %s\n",
+                    mmc::Vault::vaultHasRecovery(QString::fromLocal8Bit(argv[2])) ? "yes" : "no");
+        if (ok)
+            std::printf("mailboxes: %d\n", int(vault.state().mailboxes.size()));
+        return ok ? 0 : 1;
+    }
+
+    // Show what is inside the header of a vault file.
+    if (argc >= 3 && QString::fromLatin1(argv[1]) == QLatin1String("--dump-vault")) {
+        QFile file(QString::fromLocal8Bit(argv[2]));
+        if (!file.open(QIODevice::ReadOnly)) {
+            std::printf("cannot read the file\n");
+            return 1;
+        }
+        QDataStream in(&file);
+        in.setVersion(QDataStream::Qt_6_0);
+        QByteArray magic;
+        quint16 version = 0, flags = 0;
+        quint32 iterations = 0;
+        QByteArray salt, pwNonce, pwWrap;
+        quint16 pwWrapLength = 0;
+        quint8 hasRecovery = 0;
+        quint32 wrapIterations = 0;
+        QByteArray wrapSalt, wrapNonce, wrappedKey;
+        quint16 wrapLength = 0;
+        QByteArray nonce;
+        quint64 cipherLen = 0;
+        in >> magic >> version >> flags >> iterations >> salt;
+        in >> pwNonce >> pwWrapLength >> pwWrap;
+        in >> hasRecovery >> wrapIterations >> wrapSalt >> wrapNonce >> wrapLength >> wrappedKey;
+        in >> nonce >> cipherLen;
+        std::printf("magic=%s version=%u iterations=%u\n", magic.constData(), version, iterations);
+        std::printf("salt=%s\n", salt.toHex().constData());
+        std::printf("pwNonce=%s pwWrapLen=%d pwWrap=%s\n", pwNonce.toHex().constData(),
+                    int(pwWrap.size()), pwWrap.toHex().constData());
+        std::printf("hasRecovery=%d wrapIter=%u wrapSalt=%s wrapNonce=%s wrapLen=%d\n",
+                    int(hasRecovery), wrapIterations, wrapSalt.toHex().constData(),
+                    wrapNonce.toHex().constData(), int(wrappedKey.size()));
+        std::printf("nonce=%s cipherLen=%llu\n", nonce.toHex().constData(),
+                    (unsigned long long)cipherLen);
+        return 0;
+    }
+
+    // Reset the master password of a vault with its recovery passphrase.
+    if (argc >= 5 && QString::fromLatin1(argv[1]) == QLatin1String("--reset-vault")) {
+        QString error;
+        const bool ok = mmc::Vault::resetMasterPassword(QString::fromLocal8Bit(argv[2]),
+                                                          QString::fromLocal8Bit(argv[3]),
+                                                          QString::fromLocal8Bit(argv[4]), &error);
+        std::printf("reset: %s %s\n", ok ? "yes" : "no", qPrintable(error));
+        return ok ? 0 : 1;
+    }
+
     QCoreApplication app(argc, argv);
+    Q_INIT_RESOURCE(icons);
 
     TestRunner runner;
 
@@ -134,6 +198,9 @@ int main(int argc, char** argv)
 
     runner.begin("imap");
     test_imap(runner);
+
+    runner.begin("icons");
+    test_icons(runner);
 
     std::printf("\n%d checks, %d failures\n", runner.checks, runner.failures);
     return runner.failures == 0 ? 0 : 1;

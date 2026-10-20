@@ -43,12 +43,18 @@ To make a portable build that runs from a USB stick:
 2. Open **Settings** and fill in the client id and client secret of the
    provider you want to use. `docs/PROVIDER-SETUP.md` explains how to get
    them, it takes about ten minutes per provider.
-3. **Add** an account, then press **Sign in with the browser** to connect it.
+3. Press **Add account**, type the address and press **Add and sign in**.
+   MMC opens your browser, you allow the app there, and the account is
+   connected and fetched.
 4. Press **Refresh all** to fetch the mail of every account.
+
+Right click an account for **Sign in again**, **Open webmail** and
+**Remove account**. The settings of an account, including the cooldown
+note, are under **More options** in the account dialog.
 
 A vault is a single file. By default it lives in `Documents\MMC`. Copy it to
 an encrypted USB stick, or keep several vaults (home, travel, work) and pick
-one at startup.
+one at startup. `MMC.exe path\to\vault.mmcv` opens a vault straight away.
 
 ## Importing accounts
 

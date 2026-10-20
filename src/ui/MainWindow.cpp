@@ -12,6 +12,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QCursor>
 #include <QDesktopServices>
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -45,6 +46,12 @@ QString webmailUrlFor(const QString& providerId)
     if (providerId == QLatin1String("yandex"))
         return QStringLiteral("https://mail.yandex.ru/");
     return QString();
+}
+
+QString providerLabelFor(const QString& providerId)
+{
+    const Provider* provider = providerById(providerId);
+    return provider ? provider->name : providerId;
 }
 
 QString formatDate(const QDateTime& date)
@@ -143,10 +150,10 @@ void MainWindow::buildUi()
     leftLayout->addWidget(m_cooldown);
 
     auto* accountButtons = new QHBoxLayout();
-    auto* addButton = new QPushButton(tr("Add"), left);
+    auto* addButton = new QPushButton(tr("Add account"), left);
     auto* editButton = new QPushButton(tr("Edit"), left);
     auto* removeButton = new QPushButton(tr("Remove"), left);
-    auto* importButton = new QPushButton(tr("Import"), left);
+    auto* importButton = new QPushButton(tr("Import file"), left);
     accountButtons->addWidget(addButton);
     accountButtons->addWidget(editButton);
     accountButtons->addWidget(removeButton);
@@ -158,6 +165,8 @@ void MainWindow::buildUi()
     connect(removeButton, &QPushButton::clicked, this, &MainWindow::onRemoveAccount);
     connect(importButton, &QPushButton::clicked, this, &MainWindow::onImportAccounts);
     connect(m_accounts, &QListWidget::itemSelectionChanged, this, &MainWindow::onAccountSelectionChanged);
+    m_accounts->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_accounts, &QListWidget::customContextMenuRequested, this, &MainWindow::onAccountMenu);
 
     // Middle: the message list.
     auto* middle = new QWidget(splitter);
@@ -242,6 +251,11 @@ void MainWindow::rebuildAccountList()
         item->setToolTip(mailbox.address);
         if (current == mailbox.id)
             m_accounts->setCurrentItem(item);
+    }
+    if (m_accounts->count() == 0) {
+        auto* hint = new QListWidgetItem(tr("No accounts yet."), m_accounts);
+        hint->setFlags(Qt::NoItemFlags);
+        hint->setToolTip(tr("Click Add account to connect your first account."));
     }
     if (!m_accounts->currentItem() && m_accounts->count() > 0)
         m_accounts->setCurrentRow(0);
@@ -334,18 +348,75 @@ void MainWindow::onAccountSelectionChanged()
     showCooldownStatus();
 }
 
-void MainWindow::onAddAccount()
+void MainWindow::storeTokens(const QString& mailboxId, const OAuth2Tokens& tokens)
 {
-    MailboxDialog dialog(m_vault, Mailbox(), this);
-    if (dialog.exec() != QDialog::Accepted)
+    if (!tokens.isValid())
         return;
-    Mailbox mailbox = dialog.mailbox();
-    m_vault->state().mailboxes.append(mailbox);
+    OAuthToken* token = m_vault->state().tokenFor(mailboxId);
+    if (!token) {
+        OAuthToken fresh;
+        fresh.mailboxId = mailboxId;
+        m_vault->state().tokens.append(fresh);
+        token = m_vault->state().tokenFor(mailboxId);
+    }
+    if (!token)
+        return;
+    token->accessToken = tokens.accessToken;
+    token->refreshToken = tokens.refreshToken;
+    token->expiry = tokens.expiry;
+    token->scope = tokens.scope;
+}
+
+void MainWindow::applyMailbox(const Mailbox& mailbox, bool isNew)
+{
+    if (isNew) {
+        m_vault->state().mailboxes.append(mailbox);
+    } else {
+        for (Mailbox& existing : m_vault->state().mailboxes) {
+            if (existing.id == mailbox.id) {
+                existing = mailbox;
+                break;
+            }
+        }
+    }
     QString error;
     if (!m_vault->save(&error))
         log(error);
     rebuildAccountList();
     rebuildMessageList();
+}
+
+void MainWindow::onAddAccount()
+{
+    MailboxDialog dialog(m_vault, Mailbox(), MailboxDialog::AddAccount, false, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    const Mailbox mailbox = dialog.mailbox();
+    applyMailbox(mailbox, true);
+    storeTokens(mailbox.id, dialog.tokens());
+
+    if (!dialog.signInError().isEmpty()) {
+        QMessageBox::warning(
+            this, tr("The account was added, but the sign in failed"),
+            tr("%1\n\nThe account is in the list, you can try the sign in again by right "
+               "clicking it.").arg(dialog.signInError()));
+        return;
+    }
+
+    const bool hasToken = m_vault->state().tokenFor(mailbox.id) != nullptr;
+    if (!hasToken && mailbox.secret.isEmpty()) {
+        QMessageBox::information(
+            this, tr("The account was added"),
+            tr("%1 is in the list.\n\nIt cannot read mail yet. Open Settings and put in the "
+               "client id of your %2 application, then right click the account and choose "
+               "'Sign in again'.").arg(mailbox.address, providerLabelFor(mailbox.providerId)));
+        return;
+    }
+
+    // The account is connected, so fetch the first mail right away.
+    log(tr("Fetching the first mail of %1...").arg(mailbox.address));
+    m_service->syncMailbox(mailbox.id);
 }
 
 void MainWindow::onEditAccount()
@@ -357,29 +428,70 @@ void MainWindow::onEditAccount()
     if (!mailbox)
         return;
 
-    MailboxDialog dialog(m_vault, *mailbox, this);
+    MailboxDialog dialog(m_vault, *mailbox, MailboxDialog::EditAccount, false, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
-    const Mailbox updated = dialog.mailbox();
 
-    for (Mailbox& existing : m_vault->state().mailboxes) {
-        if (existing.id == id) {
-            if (!existing.cooldownUntil.isValid() && updated.cooldownUntil.isValid()) {
-                QMessageBox::information(
-                    this, tr("Cooldown started"),
-                    tr("The details of %1 cannot be changed until %2.")
-                        .arg(updated.displayName.isEmpty() ? updated.address : updated.displayName,
-                             updated.cooldownUntil.toString(QStringLiteral("dd MMM yyyy"))));
-            }
-            existing = updated;
-            break;
-        }
+    const Mailbox updated = dialog.mailbox();
+    const bool startedCooldown = !mailbox->cooldownUntil.isValid() && updated.cooldownUntil.isValid();
+    applyMailbox(updated, false);
+    storeTokens(updated.id, dialog.tokens());
+
+    if (startedCooldown) {
+        QMessageBox::information(
+            this, tr("Cooldown started"),
+            tr("The details of %1 cannot be changed until %2.")
+                .arg(updated.displayName.isEmpty() ? updated.address : updated.displayName,
+                     updated.cooldownUntil.toString(QStringLiteral("dd MMM yyyy"))));
     }
-    QString error;
-    if (!m_vault->save(&error))
-        log(error);
-    rebuildAccountList();
-    showCooldownStatus();
+    if (!dialog.signInError().isEmpty()) {
+        QMessageBox::warning(this, tr("The sign in failed"), dialog.signInError());
+    }
+}
+
+void MainWindow::onSignInAgain()
+{
+    const QString id = selectedMailboxId();
+    if (id.isEmpty())
+        return;
+    const Mailbox* mailbox = m_vault->state().mailboxById(id);
+    if (!mailbox)
+        return;
+
+    MailboxDialog dialog(m_vault, *mailbox, MailboxDialog::EditAccount, true, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    if (dialog.hasTokens()) {
+        storeTokens(mailbox->id, dialog.tokens());
+        QString error;
+        m_vault->save(&error);
+        log(tr("Signed in."));
+    }
+    if (!dialog.signInError().isEmpty())
+        QMessageBox::warning(this, tr("The sign in failed"), dialog.signInError());
+}
+
+void MainWindow::onAccountMenu()
+{
+    QMenu menu(this);
+    QAction* edit = menu.addAction(tr("Edit account"));
+    QAction* signIn = menu.addAction(tr("Sign in again"));
+    QAction* webmail = menu.addAction(tr("Open webmail"));
+    menu.addSeparator();
+    QAction* remove = menu.addAction(tr("Remove account"));
+
+    QAction* chosen = menu.exec(QCursor::pos());
+    if (!chosen)
+        return;
+    if (chosen == edit) {
+        onEditAccount();
+    } else if (chosen == signIn) {
+        onSignInAgain();
+    } else if (chosen == webmail) {
+        onOpenWebmail();
+    } else if (chosen == remove) {
+        onRemoveAccount();
+    }
 }
 
 void MainWindow::onRemoveAccount()

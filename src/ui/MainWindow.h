@@ -2,6 +2,7 @@
 
 #include "core/Model.h"
 #include "net/Mime.h"
+#include "net/OAuth2.h"
 
 #include <QHash>
 #include <QMainWindow>
@@ -29,6 +30,8 @@ private slots:
     void onAddAccount();
     void onEditAccount();
     void onRemoveAccount();
+    void onSignInAgain();
+    void onAccountMenu();
     void onImportAccounts();
     void onRefreshAll();
     void onRefreshAccount();
@@ -48,6 +51,8 @@ private:
     void rebuildAccountList();
     void rebuildMessageList();
     void showMessageBody(const ParsedMessage& parsed, const QByteArray& raw);
+    void storeTokens(const QString& mailboxId, const OAuth2Tokens& tokens);
+    void applyMailbox(const Mailbox& mailbox, bool isNew);
     QString selectedMailboxId() const;
     Message messageById(const QString& id) const;
     void log(const QString& text);

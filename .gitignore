@@ -14,3 +14,5 @@ vaults/
 *.db-shm
 aqtinstall.log
 *.log
+dist/
+build*/

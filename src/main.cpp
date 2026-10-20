@@ -3,6 +3,7 @@
 #include "ui/VaultDialogs.h"
 
 #include <QApplication>
+#include <QFileInfo>
 #include <QMessageBox>
 
 using namespace mmc;
@@ -14,30 +15,43 @@ int main(int argc, char* argv[])
     QApplication::setApplicationDisplayName(QStringLiteral("MMC"));
     QApplication::setOrganizationName(QStringLiteral("MMC"));
 
-    VaultChooserDialog chooser;
-    if (chooser.exec() != QDialog::Accepted)
-        return 0;
-
-    const QString path = chooser.selectedPath();
-    if (path.isEmpty())
-        return 0;
+    // A vault can be named on the command line, which is handy for the vault
+    // on a USB stick: MMC.exe D:\vaults\mine.mmcv
+    const QStringList arguments = QApplication::arguments();
+    const QString wantedVault = arguments.size() > 1 ? arguments.at(1) : QString();
 
     Vault vault;
-    if (!vault.isOpen()) {
-        // A vault that was just created is already open, otherwise ask for the
-        // master password.
-        QString password = chooser.createdPassword();
-        if (password.isEmpty()) {
-            MasterPasswordDialog dialog(QObject::tr("Unlock %1").arg(path), false, nullptr);
-            if (dialog.exec() != QDialog::Accepted)
-                return 0;
-            password = dialog.password();
-        }
-        QString error;
-        if (!vault.open(path, password, &error)) {
-            QMessageBox::critical(nullptr, QObject::tr("Cannot open the vault"), error);
+    QString path = wantedVault;
+    QString password;
+
+    if (!path.isEmpty()) {
+        if (!QFileInfo::exists(path)) {
+            QMessageBox::critical(nullptr, QObject::tr("No vault"),
+                                 QObject::tr("%1 does not exist.").arg(path));
             return 1;
         }
+    } else {
+        VaultChooserDialog chooser;
+        if (chooser.exec() != QDialog::Accepted)
+            return 0;
+        path = chooser.selectedPath();
+        if (path.isEmpty())
+            return 0;
+        password = chooser.createdPassword();
+    }
+
+    if (password.isEmpty()) {
+        MasterPasswordDialog dialog(QObject::tr("Unlock %1").arg(QFileInfo(path).fileName()),
+                                     false, nullptr);
+        if (dialog.exec() != QDialog::Accepted)
+            return 0;
+        password = dialog.password();
+    }
+
+    QString error;
+    if (!vault.open(path, password, &error)) {
+        QMessageBox::critical(nullptr, QObject::tr("Cannot open the vault"), error);
+        return 1;
     }
 
     MainWindow window(&vault);

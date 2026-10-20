@@ -173,20 +173,17 @@ bool OAuth2::authorize(const Provider& provider,
     const QString verifier = makeCodeVerifier();
     const QString challenge = codeChallengeFor(verifier);
 
-    bool usePkce = true;
     QString code;
     QString returnedState;
     QString oauthError;
 
-    for (int attempt = 0; attempt < 2 && code.isEmpty() && oauthError.isEmpty(); ++attempt) {
-        const QString url = buildAuthUrl(provider, clientId, redirectUri, state,
-                                         usePkce ? challenge : QString(), usePkce);
+    {
+        const QString url = buildAuthUrl(provider, clientId, redirectUri, state, challenge, true);
         QDesktopServices::openUrl(QUrl(url));
 
         QEventLoop loop;
         QTimer timeout;
         timeout.setSingleShot(true);
-        bool handled = false;
         QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
         QObject::connect(&server, &QTcpServer::newConnection, &server, [&]() {
             QTcpSocket* socket = server.nextPendingConnection();
@@ -195,7 +192,6 @@ bool OAuth2::authorize(const Provider& provider,
             QByteArray request;
             while (socket->waitForReadyRead(2000))
                 request += socket->readAll();
-            const int headerEnd = request.indexOf("\r\n\r\n");
             const QByteArray requestLine = request.left(request.indexOf("\r\n"));
             const QList<QByteArray> parts = requestLine.split(' ');
             if (parts.size() >= 2) {
@@ -211,28 +207,12 @@ bool OAuth2::authorize(const Provider& provider,
             socket->write(reply);
             socket->waitForBytesWritten(2000);
             socket->disconnectFromHost();
-            handled = true;
             loop.quit();
         });
         timeout.start(5 * 60 * 1000);
         loop.exec();
-        server.close();
-        if (!server.listen(QHostAddress::LocalHost, static_cast<quint16>(port)))
-            break;
-
-        if (!oauthError.isEmpty())
-            break;
-        if (code.isEmpty()) {
-            if (handled)
-                break;
-            continue;
-        }
-        if (returnedState != state) {
-            if (error) *error = QObject::tr("The sign in answer did not match the request.");
-            return false;
-        }
-        break;
     }
+    server.close();
 
     if (!oauthError.isEmpty()) {
         if (error) *error = QObject::tr("The provider refused the sign in: %1").arg(oauthError);
@@ -240,6 +220,10 @@ bool OAuth2::authorize(const Provider& provider,
     }
     if (code.isEmpty()) {
         if (error) *error = QObject::tr("No sign in answer arrived.");
+        return false;
+    }
+    if (returnedState != state) {
+        if (error) *error = QObject::tr("The sign in answer did not match the request.");
         return false;
     }
 

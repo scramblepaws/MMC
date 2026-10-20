@@ -73,6 +73,18 @@ password can be left empty for accounts that sign in with the browser.
   headers are, so the file stays small.
 - Nothing is sent anywhere except to the mail provider you configured.
 
+## What the first version does not do
+
+- No background refresh. Mail arrives when you press Refresh or Refresh all.
+  That also means no notifications and no unread count that updates by
+  itself.
+- No reading of two factor codes out of the mail. The mail is shown, you read
+  the code yourself.
+- Html mail is shown with the simple renderer of Qt, so a mail that leans on
+  css looks plainer than it should. **Open webmail** hands the account to the
+  browser for that.
+- Search looks in the mail that was loaded, not on the server.
+
 ## Layout
 
 ```

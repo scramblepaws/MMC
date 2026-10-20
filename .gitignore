@@ -1,0 +1,16 @@
+build/
+out/
+*.user
+.vs/
+.vscode/
+.idea/
+
+# Vaults and account data never belong in git
+*.mmcv
+*.mmcv.tmp
+vaults/
+*.db
+*.db-wal
+*.db-shm
+aqtinstall.log
+*.log

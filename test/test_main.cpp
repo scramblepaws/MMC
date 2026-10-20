@@ -1,0 +1,38 @@
+#include <QCoreApplication>
+#include <cstdio>
+
+#include "test_harness.h"
+
+void test_crypto(TestRunner& runner);
+void test_vault(TestRunner& runner);
+void test_mime(TestRunner& runner);
+void test_importer(TestRunner& runner);
+void test_imap(TestRunner& runner);
+
+int main(int argc, char** argv)
+{
+    // Unbuffered, so the output survives a crash.
+    setvbuf(stdout, nullptr, _IONBF, 0);
+
+    QCoreApplication app(argc, argv);
+
+    TestRunner runner;
+
+    runner.begin("crypto");
+    test_crypto(runner);
+
+    runner.begin("vault");
+    test_vault(runner);
+
+    runner.begin("mime");
+    test_mime(runner);
+
+    runner.begin("importer");
+    test_importer(runner);
+
+    runner.begin("imap");
+    test_imap(runner);
+
+    std::printf("\n%d checks, %d failures\n", runner.checks, runner.failures);
+    return runner.failures == 0 ? 0 : 1;
+}

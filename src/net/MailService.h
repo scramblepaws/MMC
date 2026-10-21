@@ -17,6 +17,8 @@ struct SyncOutcome {
     QVector<ImapFolderInfo> folders;
     int unseen = 0;
     qint64 uidNext = 0;
+    QString folderName = QStringLiteral("INBOX");
+    QString folderKind = QStringLiteral("inbox");
     OAuth2Tokens refreshedTokens;   // valid when the access token had to be renewed
     bool haveRefreshedTokens = false;
 };
@@ -30,6 +32,7 @@ public:
     explicit MailService(Vault* vault, QObject* parent = nullptr);
 
     void syncMailbox(const QString& mailboxId);
+    void syncFolder(const QString& mailboxId, const QString& folderName, const QString& folderKind);
     void syncAll();
     void fetchBody(const QString& messageId);
     void sendMessage(const QString& mailboxId, const QString& to, const QString& cc,
@@ -46,6 +49,8 @@ signals:
     void logMessage(const QString& text);
 
 private:
+    void syncFolderInternal(const QString& mailboxId, const QString& folderName,
+                            const QString& folderKind);
     Vault* m_vault = nullptr;
 };
 

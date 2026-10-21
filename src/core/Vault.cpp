@@ -23,7 +23,7 @@ constexpr int kTagLength = 16;
 constexpr int kWrapLength = 32 + kTagLength;
 constexpr int kWrapIterations = 200000;
 const char* kStateMagic = "MMCSTATE";
-constexpr quint32 kStateVersion = 1;
+constexpr quint32 kStateVersion = 2;   // 2: the mail has a preview and a folder kind
 const char* kPassphraseAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 } // namespace
 
@@ -73,8 +73,12 @@ bool Vault::deserialise(const QByteArray& blob, VaultState* state)
     QByteArray magic;
     quint32 version = 0;
     in >> magic >> version;
-    if (magic != kStateMagic || version != kStateVersion)
+    if (magic != kStateMagic) {
         return false;
+    }
+    if (version != kStateVersion) {
+        return false;
+    }
     in >> *state;
     return in.status() == QDataStream::Ok;
 }
@@ -135,7 +139,9 @@ bool Vault::open(const QString& path, const QString& masterPassword, QString* er
 
     VaultState state;
     if (!deserialise(plain, &state)) {
-        if (error) *error = QObject::tr("The vault file is not a valid MMC vault.");
+        if (error)
+            *error = QObject::tr("This vault was made with an older version of MMC and cannot be "
+                                 "read. The accounts have to be added again.");
         return false;
     }
 
@@ -578,27 +584,29 @@ QDataStream& operator>>(QDataStream& in, OAuthToken& t)
 
 QDataStream& operator<<(QDataStream& out, const Folder& f)
 {
-    out << f.id << f.mailboxId << f.name << f.delimiter << f.uidValidity << f.uidNext;
+    out << f.id << f.mailboxId << f.name << f.delimiter << f.uidValidity << f.uidNext << f.kind;
     return out;
 }
 
 QDataStream& operator>>(QDataStream& in, Folder& f)
 {
-    in >> f.id >> f.mailboxId >> f.name >> f.delimiter >> f.uidValidity >> f.uidNext;
+    in >> f.id >> f.mailboxId >> f.name >> f.delimiter >> f.uidValidity >> f.uidNext >> f.kind;
     return in;
 }
 
 QDataStream& operator<<(QDataStream& out, const Message& m)
 {
     out << m.id << m.mailboxId << m.folderId << m.uid << m.messageId
-        << m.from << m.to << m.subject << m.date << m.size << m.flags << m.hasAttachment;
+        << m.from << m.to << m.subject << m.date << m.size << m.flags << m.hasAttachment
+        << m.preview << m.folderKind;
     return out;
 }
 
 QDataStream& operator>>(QDataStream& in, Message& m)
 {
     in >> m.id >> m.mailboxId >> m.folderId >> m.uid >> m.messageId
-       >> m.from >> m.to >> m.subject >> m.date >> m.size >> m.flags >> m.hasAttachment;
+       >> m.from >> m.to >> m.subject >> m.date >> m.size >> m.flags >> m.hasAttachment
+       >> m.preview >> m.folderKind;
     return in;
 }
 

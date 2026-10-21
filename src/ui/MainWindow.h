@@ -3,22 +3,24 @@
 #include "core/Model.h"
 #include "net/Mime.h"
 #include "net/OAuth2.h"
+#include "ui/MessageList.h"
+#include "ui/Sidebar.h"
+#include "ui/Toast.h"
 
 #include <QHash>
 #include <QMainWindow>
 
-class QListWidget;
-class QTableWidget;
-class QTextBrowser;
-class QLineEdit;
 class QLabel;
-class QListWidgetItem;
+class QLineEdit;
 class QStackedWidget;
 
 namespace mmc {
 
 class Vault;
 class MailService;
+class Sidebar;
+class MessageList;
+class Reader;
 
 class MainWindow : public QMainWindow
 {
@@ -27,60 +29,68 @@ public:
     explicit MainWindow(Vault* vault, QWidget* parent = nullptr);
     ~MainWindow() override;
 
+protected:
+    bool event(QEvent* event) override;
+
 private slots:
     void onAddAccount();
     void onEditAccount();
     void onRemoveAccount();
     void onSignInAgain();
-    void onAccountMenu();
-    void onAccountFilterChanged();
-    void onAccountSelectionChanged();
+    void onAccountMenu(const QString& mailboxId, const QPoint& position);
+    void onViewChanged(Sidebar::View view);
+    void onAccountSelected(const QString& mailboxId);
     void onImportAccounts();
     void onRefreshAll();
     void onRefreshAccount();
     void onSyncFinished(const QString& mailboxId, bool ok, const QString& error);
-    void onMessageSelectionChanged();
+    void onMessageActivated(const QString& messageId);
     void onBodyReady(const QString& messageId, const QByteArray& raw);
     void onBodyFailed(const QString& messageId, const QString& error);
     void onCompose();
+    void onReply();
     void onSendFinished(bool ok, const QString& error);
-    void onSearch();
+    void onSearchChanged(const QString& text);
     void onOpenWebmail();
     void onSettings();
-    void onSaveAttachment();
-    void onSortColumn(int column);
+    void onAccountManager();
+    void onFilterChanged(MessageList::Filter filter);
+    void onMarkRead();
+    void onDeleteMessage();
+    void onStarToggled(const QString& messageId, bool starred);
 
 private:
     void buildUi();
-    void rebuildAccountList();
-    void rebuildMessageList();
-    void showMessageBody(const ParsedMessage& parsed, const QByteArray& raw);
+    void rebuildAccounts();
+    void rebuildMessages();
+    void showMessage(const Message& message);
     void storeTokens(const QString& mailboxId, const OAuth2Tokens& tokens);
     void applyMailbox(const Mailbox& mailbox, bool isNew);
     QString selectedMailboxId() const;
     Message messageById(const QString& id) const;
     void log(const QString& text);
+    void toast(const QString& title, const QString& text, Toast::Kind kind);
     void showCooldownStatus();
+    QVector<Message> messagesForView() const;
+    void fetchFolderForView();
 
     Vault* m_vault = nullptr;
     MailService* m_service = nullptr;
 
-    QListWidget* m_accounts = nullptr;
-    QLineEdit* m_accountFilter = nullptr;
-    QStackedWidget* m_messageArea = nullptr;
-    QTableWidget* m_messages = nullptr;
-    QLabel* m_messageHint = nullptr;
-    QLabel* m_readerHeader = nullptr;
-    QTextBrowser* m_reader = nullptr;
-    QListWidget* m_attachments = nullptr;
+    Sidebar* m_sidebar = nullptr;
+    MessageList* m_messages = nullptr;
+    Reader* m_reader = nullptr;
     QLineEdit* m_search = nullptr;
     QLabel* m_cooldown = nullptr;
     QLabel* m_status = nullptr;
+    QStackedWidget* m_toasts = nullptr;
 
     QHash<QString, QByteArray> m_bodyCache;
+    QHash<QString, bool> m_starred;
     QString m_currentMessageId;
-    int m_sortColumn = 3;      // the date
-    bool m_sortAscending = false;
+    Sidebar::View m_view = Sidebar::View::AllAccounts;
+    QString m_accountFilter;
+    QString m_searchText;
 };
 
 } // namespace mmc

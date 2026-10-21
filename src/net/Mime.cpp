@@ -293,9 +293,73 @@ QString decodeHeaderValue(const QString& value)
     return out;
 }
 
-ParsedMessage parseMime(const QByteArray& raw)
+QString senderName(const QString& from)
 {
-    ParsedMessage msg;
+    const QString decoded = decodeHeaderValue(from);
+    const int bracket = decoded.indexOf(QChar('<'));
+    if (bracket < 0)
+        return decoded.trimmed();
+    QString name = decoded.left(bracket).trimmed();
+    if (name.startsWith(QChar('"')) && name.endsWith(QChar('"')) && name.size() > 1)
+        name = name.mid(1, name.size() - 2);
+    return name.isEmpty() ? decoded.trimmed() : name;
+}
+
+QString sanitizeMailHtml(const QString& html, bool allowRemoteImages)
+{
+    QString out = html;
+
+    // Scripts and the code that goes with them.
+    static const QRegularExpression scriptRe(QStringLiteral("<script\\b[^>]*>.*?</script>"),
+                                             QRegularExpression::CaseInsensitiveOption
+                                                 | QRegularExpression::DotMatchesEverythingOption);
+    out.remove(scriptRe);
+    static const QRegularExpression styleRe(QStringLiteral("<style\\b[^>]*>.*?</style>"),
+                                            QRegularExpression::CaseInsensitiveOption
+                                                | QRegularExpression::DotMatchesEverythingOption);
+    out.remove(styleRe);
+    static const QRegularExpression eventRe(
+        QStringLiteral("\\son[a-z]+\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)"),
+        QRegularExpression::CaseInsensitiveOption);
+    out.remove(eventRe);
+    out.remove(QStringLiteral("javascript:"), Qt::CaseInsensitive);
+
+    if (!allowRemoteImages) {
+        // Pictures that are not in the mail are left out, so a mail cannot
+        // tell the server that it was opened.
+        static const QRegularExpression imageRe(
+            QStringLiteral("<img\\b[^>]*\\bsrc\\s*=\\s*(\"https?://[^\"]*\"|'https?://[^']*')[^>]*>"),
+            QRegularExpression::CaseInsensitiveOption);
+        out.replace(imageRe, QStringLiteral("<span>[image]</span>"));
+        // The same for the background of a table.
+        static const QRegularExpression backgroundRe(
+            QStringLiteral("background(-image)?\\s*=\\s*[^;\"']*url\\s*\\(\\s*['\"]?https?://[^)]*\\)"),
+            QRegularExpression::CaseInsensitiveOption);
+        out.remove(backgroundRe);
+    }
+    return out;
+}
+
+QString snippetFromBody(const QByteArray& body)
+{
+    QString text = QString::fromUtf8(body.left(400));
+    if (text.contains(QChar('<'))) {
+        // It is html, take the words out of it.
+        static const QRegularExpression tagRe(QStringLiteral("<[^>]*>"));
+        text.remove(tagRe);
+        static const QRegularExpression spaceRe(QStringLiteral("&nbsp;"));
+        text.replace(spaceRe, QStringLiteral(" "));
+    }
+    text.replace(QChar('\r'), QChar(' '));
+    text.replace(QChar('\n'), QChar(' '));
+    text.replace(QChar('\t'), QChar(' '));
+    while (text.contains(QStringLiteral("  ")))
+        text.replace(QStringLiteral("  "), QStringLiteral(" "));
+    return text.trimmed().left(200);
+}
+
+ParsedMessage parseMime(const QByteArray& raw)
+{    ParsedMessage msg;
     const int split = raw.indexOf("\r\n\r\n");
     const int split2 = (split < 0) ? raw.indexOf("\n\n") : -1;
     QByteArray headerBlock;

@@ -109,17 +109,29 @@ setting up.
 
 ## What the program looks like
 
-- **Accounts** on the left, with the logo of the provider, the number of
-  unread messages and a mark for an account that is on cooldown.
-  The filter box narrows the list down, **All accounts** at the top shows the
-  mail of every account in one list.
-- **The mail** in the middle, newest first, unread subjects in bold, the
-  account each message came from in the colour of its provider. Click a
-  column heading to sort.
-- **The message** on the right, with the sender, the recipient and the date
-  above the text.
+- **The left column** holds the name of the program, the button to write a
+  message, the places to look (all accounts, inbox, starred, sent, drafts,
+  spam, trash) and the accounts with their logo, their address and the number
+  of unread messages.
+- **The bar on top** has the search field (Ctrl+F) and the actions of the
+  program: manage the accounts, refresh, write, settings.
+- **The mail** in the middle, newest first, with the tabs *All, Unread,
+  Starred, Attachments*. Every row has the logo of the provider, the sender,
+  the subject, a line of the mail, the time and a star. Unread mails have
+  stronger letters and a violet dot.
+- **The message** on the right, with the sender, the recipient and the time
+  above the text. Html mail keeps its own look on a light sheet, so a mail
+  that was made for a white background stays readable. Pictures from the
+  internet are not loaded unless that is wanted, and scripts in a mail never
+  run.
+- When something goes wrong there is a **Try again** button, not an empty
+  screen.
 - Keyboard: `Ctrl+R` refresh all, `F5` refresh the account that is picked,
   `Ctrl+N` new message, `Ctrl+F` search.
+
+The colours, the spacing and the type come from one place, `src/ui/Theme.cpp`,
+so every window looks the same. The icons are the outline icons of Lucide and
+the font is Inter, both are shipped with the program.
 
 Right click an account for **Sign in again**, **Open webmail** and
 **Remove account**. The settings of an account, including the cooldown

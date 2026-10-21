@@ -1,5 +1,6 @@
 #include "core/Vault.h"
 #include "ui/MainWindow.h"
+#include "ui/Theme.h"
 #include "ui/VaultDialogs.h"
 
 #include <QApplication>
@@ -10,8 +11,9 @@ using namespace mmc;
 
 int main(int argc, char* argv[])
 {
-    Q_INIT_RESOURCE(icons);
+    Q_INIT_RESOURCE(resources);
     QApplication app(argc, argv);
+    Theme::apply(app);
     QApplication::setApplicationName(QStringLiteral("MMC"));
     QApplication::setApplicationDisplayName(QStringLiteral("MMC"));
     QApplication::setOrganizationName(QStringLiteral("MMC"));
@@ -65,5 +67,6 @@ int main(int argc, char* argv[])
 
     MainWindow window(&vault);
     window.show();
+    Theme::makeFrameDark(&window);
     return app.exec();
 }

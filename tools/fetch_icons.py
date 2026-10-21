@@ -71,7 +71,7 @@ def main() -> None:
         if box:
             image = image.crop(box)
 
-        # Scale it down so it is sharp, then centre it on a square.
+        # Scale it so it fits, then centre it on a square of exactly this size.
         image.thumbnail((SIZE, SIZE), Image.LANCZOS)
         canvas = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
         canvas.paste(image, ((SIZE - image.width) // 2, (SIZE - image.height) // 2), image)

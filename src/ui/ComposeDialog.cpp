@@ -1,5 +1,6 @@
 #include "ui/ComposeDialog.h"
 #include "core/ProviderIcons.h"
+#include "ui/Icons.h"
 
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -57,6 +58,9 @@ ComposeDialog::ComposeDialog(const QVector<Mailbox>& mailboxes, QWidget* parent)
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
     QPushButton* sendButton = buttons->addButton(tr("Send"), QDialogButtonBox::AcceptRole);
+    sendButton->setProperty("accent", true);
+    sendButton->setIcon(Icons::icon(QStringLiteral("sent"), Qt::white, 16));
+    sendButton->setMinimumHeight(36);
     layout->addWidget(buttons);
 
     connect(addButton, &QPushButton::clicked, this, &ComposeDialog::onAddAttachment);
@@ -122,6 +126,16 @@ QStringList ComposeDialog::attachmentNames() const
     for (int i = 0; i < m_attachments->count(); ++i)
         names << m_attachments->item(i)->text();
     return names;
+}
+
+void ComposeDialog::setRecipient(const QString& address)
+{
+    m_to->setText(address);
+}
+
+void ComposeDialog::setSubject(const QString& subject)
+{
+    m_subject->setText(subject);
 }
 
 } // namespace mmc

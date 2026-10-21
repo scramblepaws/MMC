@@ -180,7 +180,7 @@ int main(int argc, char** argv)
     }
 
     QCoreApplication app(argc, argv);
-    Q_INIT_RESOURCE(icons);
+    Q_INIT_RESOURCE(resources);
 
     TestRunner runner;
 

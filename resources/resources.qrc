@@ -4,4 +4,7 @@
         <file alias="outlook.png">icons/outlook.png</file>
         <file alias="yandex.png">icons/yandex.png</file>
     </qresource>
+    <qresource prefix="/fonts">
+        <file alias="Inter-Variable.ttf">fonts/Inter-Variable.ttf</file>
+    </qresource>
 </RCC>

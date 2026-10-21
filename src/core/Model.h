@@ -40,6 +40,7 @@ struct Folder {
     QString delimiter = "/";
     qint64 uidValidity = 0;
     qint64 uidNext = 0;
+    QString kind;                        // "inbox", "sent", "drafts", "junk", "trash" or ""
 };
 
 // Message headers only. Bodies are fetched on demand and kept in memory.
@@ -54,8 +55,10 @@ struct Message {
     QString subject;
     QDateTime date;
     int size = 0;
-    QString flags;                       // IMAP flags, e.g. "\\Seen \\Flagged"
+    QString flags;
     bool hasAttachment = false;
+    QString preview;                     // the first words of the mail
+    QString folderKind;                  // which folder it came from
 };
 
 // Everything a vault holds. Serialised as one encrypted blob.
@@ -88,3 +91,8 @@ QDataStream& operator<<(QDataStream& out, const VaultState& s);
 QDataStream& operator>>(QDataStream& in, VaultState& s);
 
 } // namespace mmc
+
+// The mail and the accounts travel through the signals of the list, so they
+// have to be known to Qt.
+Q_DECLARE_METATYPE(mmc::Message)
+Q_DECLARE_METATYPE(mmc::Mailbox)

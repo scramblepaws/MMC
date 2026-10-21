@@ -16,3 +16,5 @@ aqtinstall.log
 *.log
 dist/
 build*/
+tools/icons-cache/
+

@@ -32,6 +32,7 @@ struct ImapHeader {
     QString messageId;
     QString flags;
     int size = 0;
+    QString snippet;         // the first words of the mail
 };
 
 // A blocking IMAP client for one mailbox at a time. The UI runs it on a

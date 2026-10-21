@@ -1,48 +1,53 @@
 #include "ui/MainWindow.h"
 
 #include "core/Importer.h"
+#include "core/ProviderIcons.h"
 #include "core/Vault.h"
 #include "net/MailService.h"
-#include "net/Mime.h"
 #include "net/Providers.h"
 #include "ui/ComposeDialog.h"
+#include "ui/EmptyState.h"
+#include "ui/Icons.h"
 #include "ui/MailboxDialog.h"
-#include "core/ProviderIcons.h"
+#include "ui/AccountManager.h"
+#include "ui/MessageList.h"
+#include "ui/SettingsDialog.h"
+#include "ui/Reader.h"
+#include "ui/Sidebar.h"
+#include "ui/Theme.h"
+#include "ui/Toast.h"
 #include "ui/VaultDialogs.h"
 
 #include <QAction>
 #include <QApplication>
-#include <QCloseEvent>
 #include <QCursor>
 #include <QDesktopServices>
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QFontMetrics>
-#include <QFormLayout>
 #include <QHBoxLayout>
-#include <QHeaderView>
-#include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
-#include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
-#include <QPainter>
 #include <QPushButton>
-#include <QShortcut>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
-#include <QStyledItemDelegate>
-#include <QTableWidget>
-#include <QTextBrowser>
-#include <QToolBar>
+#include <QTimer>
+#include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <QWindow>
 
 namespace mmc {
 namespace {
+
+QString providerLabelFor(const QString& providerId)
+{
+    const Provider* provider = providerById(providerId);
+    return provider ? provider->name : providerId;
+}
 
 QString webmailUrlFor(const QString& providerId)
 {
@@ -55,151 +60,14 @@ QString webmailUrlFor(const QString& providerId)
     return QString();
 }
 
-QString providerLabelFor(const QString& providerId)
-{
-    const Provider* provider = providerById(providerId);
-    return provider ? provider->name : providerId;
-}
-
-QColor providerColor(const QString& providerId)
-{
-    if (providerId == QLatin1String("google"))
-        return QColor(0xE8, 0x77, 0x22);
-    if (providerId == QLatin1String("microsoft"))
-        return QColor(0x2F, 0x7C, 0xC4);
-    if (providerId == QLatin1String("yandex"))
-        return QColor(0xE0, 0x4B, 0x3A);
-    return QColor(0x6E, 0x77, 0x83);
-}
-
-QString providerInitial(const QString& providerId)
-{
-    if (providerId == QLatin1String("google"))
-        return QStringLiteral("G");
-    if (providerId == QLatin1String("microsoft"))
-        return QStringLiteral("M");
-    if (providerId == QLatin1String("yandex"))
-        return QStringLiteral("Y");
-    return QStringLiteral("?");
-}
-
-QString formatDate(const QDateTime& date)
-{
-    if (!date.isValid())
-        return {};
-    if (date.date() == QDate::currentDate())
-        return date.toString(QStringLiteral("HH:mm"));
-    if (date.date().addDays(1) == QDate::currentDate())
-        return QObject::tr("yesterday");
-    if (date.date().year() == QDate::currentDate().year())
-        return date.toString(QStringLiteral("dd MMM HH:mm"));
-    return date.toString(QStringLiteral("dd MMM yyyy"));
-}
-
-// "Someone <someone@gmail.com>" becomes "Someone".
-QString senderName(const QString& from)
-{
-    const QString decoded = decodeHeaderValue(from);
-    const int bracket = decoded.indexOf(QChar('<'));
-    if (bracket < 0)
-        return decoded.trimmed();
-    QString name = decoded.left(bracket).trimmed();
-    if (name.startsWith(QChar('"')) && name.endsWith(QChar('"')) && name.size() > 1)
-        name = name.mid(1, name.size() - 2);
-    return name.isEmpty() ? decoded.trimmed() : name;
-}
-
-// Draws the account list: a coloured letter for the provider, the name, the
-// number of unread messages and a mark for an account on cooldown.
-class AccountDelegate : public QStyledItemDelegate
-{
-public:
-    explicit AccountDelegate(QObject* parent = nullptr) : QStyledItemDelegate(parent) {}
-    void paint(QPainter* painter, const QStyleOptionViewItem& option,
-               const QModelIndex& index) const override
-    {
-        QStyleOptionViewItem opt(option);
-        initStyleOption(&opt, index);
-        opt.text.clear();
-
-        QWidget* widget = const_cast<QWidget*>(opt.widget);
-        QStyle* style = widget ? widget->style() : QApplication::style();
-        style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, widget);
-
-        const QString providerId = index.data(Qt::UserRole + 1).toString();
-        const int unread = index.data(Qt::UserRole + 2).toInt();
-        const bool cooldown = index.data(Qt::UserRole + 3).toBool();
-        const QString name = index.data(Qt::UserRole + 4).toString();
-        const bool isAll = index.data(Qt::UserRole + 5).toBool();
-
-        const QRect rect = opt.rect;
-        painter->save();
-        painter->setRenderHint(QPainter::Antialiasing, true);
-
-        const int chipSize = 20;
-        const QRect chip(rect.left() + 6, rect.center().y() - chipSize / 2, chipSize, chipSize);
-        const QPixmap logo = providerPixmap(providerId, chipSize - 2);
-        if (!logo.isNull()) {
-            painter->drawPixmap(chip, logo);
-        } else if (isAll) {
-            // A small envelope for the unified inbox.
-            painter->setBrush(Qt::NoBrush);
-            painter->setPen(QPen(QColor(0x9A, 0xA4, 0xB0), 1.5));
-            painter->drawRoundedRect(chip.adjusted(1, 3, -1, -3), 3, 3);
-            painter->drawLine(chip.left() + 2, chip.top() + 4, chip.center().x(), chip.top() + 9);
-            painter->drawLine(chip.right() - 2, chip.top() + 4, chip.center().x(), chip.top() + 9);
-        } else {
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(providerColor(providerId));
-            painter->drawRoundedRect(chip, 5, 5);
-            painter->setPen(Qt::white);
-            QFont letterFont = painter->font();
-            letterFont.setBold(true);
-            painter->setFont(letterFont);
-            painter->drawText(chip, Qt::AlignCenter, providerInitial(providerId));
-        }
-
-        QFont nameFont = painter->font();
-        nameFont.setBold(unread > 0 || isAll);
-        painter->setFont(nameFont);
-        if (opt.state & QStyle::State_Selected)
-            painter->setPen(opt.palette.color(QPalette::HighlightedText));
-        else
-            painter->setPen(opt.palette.color(QPalette::Text));
-        const int rightSpace = unread > 0 ? 44 : (cooldown ? 26 : 10);
-        QRect textRect(chip.right() + 8, rect.top(), rect.right() - chip.right() - 8 - rightSpace,
-                       rect.height());
-        painter->drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft,
-                          opt.fontMetrics.elidedText(name, Qt::ElideRight, textRect.width()));
-
-        if (unread > 0) {
-            const QString text = QString::number(unread);
-            const QFontMetrics metrics(painter->font());
-            const int width = metrics.horizontalAdvance(text) + 14;
-            const QRect pill(rect.right() - width - 8, rect.center().y() - 9, width, 18);
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(QColor(0x5A, 0x6B, 0x7D));
-            painter->drawRoundedRect(pill, 9, 9);
-            painter->setPen(Qt::white);
-            painter->drawText(pill, Qt::AlignCenter, text);
-        }
-
-        if (cooldown) {
-            painter->setPen(QColor(0xE0, 0xA8, 0x00));
-            painter->drawText(QRect(rect.right() - 22, rect.center().y() - 10, 18, 20),
-                              Qt::AlignCenter, QStringLiteral("*"));
-        }
-        painter->restore();
-    }
-};
-
 } // namespace
 
 MainWindow::MainWindow(Vault* vault, QWidget* parent)
     : QMainWindow(parent), m_vault(vault)
 {
     setWindowTitle(tr("MMC - %1").arg(vault->name()));
-    resize(1360, 840);
+    resize(1440, 900);
+    setMinimumSize(1024, 640);
     buildUi();
 
     m_service = new MailService(m_vault, this);
@@ -207,200 +75,179 @@ MainWindow::MainWindow(Vault* vault, QWidget* parent)
     connect(m_service, &MailService::bodyReady, this, &MainWindow::onBodyReady);
     connect(m_service, &MailService::bodyFailed, this, &MainWindow::onBodyFailed);
     connect(m_service, &MailService::sendFinished, this, &MainWindow::onSendFinished);
-    connect(m_service, &MailService::logMessage, this, &MainWindow::log);
 
-    rebuildAccountList();
-    rebuildMessageList();
+    rebuildAccounts();
+    rebuildMessages();
+    m_reader->showEmpty();
 }
 
 MainWindow::~MainWindow() = default;
 
+bool MainWindow::event(QEvent* event)
+{
+    return QMainWindow::event(event);
+}
+
 void MainWindow::buildUi()
 {
-    auto* toolbar = addToolBar(tr("Main"));
-    toolbar->setMovable(false);
-    toolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
-
-    auto* refreshAll = new QAction(tr("Refresh all"), this);
-    refreshAll->setToolTip(tr("Fetch the newest mail of every account (Ctrl+R)"));
-    refreshAll->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_R));
-    connect(refreshAll, &QAction::triggered, this, &MainWindow::onRefreshAll);
-    toolbar->addAction(refreshAll);
-
-    auto* refreshOne = new QAction(tr("Refresh"), this);
-    refreshOne->setToolTip(tr("Fetch the newest mail of the account that is picked (F5)"));
-    refreshOne->setShortcut(QKeySequence(Qt::Key_F5));
-    connect(refreshOne, &QAction::triggered, this, &MainWindow::onRefreshAccount);
-    toolbar->addAction(refreshOne);
-
-    toolbar->addSeparator();
-
-    auto* compose = new QAction(tr("New message"), this);
-    compose->setToolTip(tr("Write a message (Ctrl+N)"));
-    compose->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_N));
-    connect(compose, &QAction::triggered, this, &MainWindow::onCompose);
-    toolbar->addAction(compose);
-
-    auto* webmail = new QAction(tr("Webmail"), this);
-    webmail->setToolTip(tr("Open the web mail of the account that is picked"));
-    connect(webmail, &QAction::triggered, this, &MainWindow::onOpenWebmail);
-    toolbar->addAction(webmail);
-
-    toolbar->addSeparator();
-
-    m_search = new QLineEdit(this);
-    m_search->setPlaceholderText(tr("Search the loaded mail (Ctrl+F)"));
-    m_search->setMaximumWidth(300);
-    m_search->setClearButtonEnabled(true);
-    m_search->setToolTip(tr("Search the mail that was loaded, not the mail on the server"));
-    connect(m_search, &QLineEdit::returnPressed, this, &MainWindow::onSearch);
-    connect(m_search, &QLineEdit::textChanged, this, &MainWindow::onSearch);
-    toolbar->addWidget(m_search);
-
-    auto* spacer = new QWidget(this);
-    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    toolbar->addWidget(spacer);
-
-    auto* settings = new QAction(tr("Settings"), this);
-    connect(settings, &QAction::triggered, this, &MainWindow::onSettings);
-    toolbar->addAction(settings);
-
     auto* central = new QWidget(this);
     setCentralWidget(central);
-    auto* layout = new QVBoxLayout(central);
-    layout->setContentsMargins(6, 6, 6, 6);
 
-    auto* splitter = new QSplitter(Qt::Horizontal, central);
+    auto* layout = new QHBoxLayout(central);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
 
-    // --- left: the accounts ---------------------------------------------
-    auto* left = new QWidget(splitter);
-    auto* leftLayout = new QVBoxLayout(left);
-    leftLayout->setContentsMargins(0, 0, 0, 0);
-    leftLayout->setSpacing(6);
+    // --- the left column ---------------------------------------------------
+    m_sidebar = new Sidebar(m_vault->name(), central);
+    connect(m_sidebar, &Sidebar::composeClicked, this, &MainWindow::onCompose);
+    connect(m_sidebar, &Sidebar::viewChanged, this, &MainWindow::onViewChanged);
+    connect(m_sidebar, &Sidebar::accountSelected, this, &MainWindow::onAccountSelected);
+    connect(m_sidebar, &Sidebar::accountContextMenuRequested, this, &MainWindow::onAccountMenu);
+    connect(m_sidebar, &Sidebar::addAccountClicked, this, &MainWindow::onAddAccount);
+    layout->addWidget(m_sidebar);
 
-    auto* accountsTitle = new QLabel(tr("Accounts"), left);
-    QFont bold = accountsTitle->font();
-    bold.setBold(true);
-    accountsTitle->setFont(bold);
-    leftLayout->addWidget(accountsTitle);
-
-    m_accountFilter = new QLineEdit(left);
-    m_accountFilter->setPlaceholderText(tr("Filter accounts"));
-    m_accountFilter->setClearButtonEnabled(true);
-    m_accountFilter->setToolTip(tr("Type part of a name or an address to narrow the list down"));
-    leftLayout->addWidget(m_accountFilter);
-
-    m_accounts = new QListWidget(left);
-    m_accounts->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_accounts->setItemDelegate(new AccountDelegate(this));
-    m_accounts->setUniformItemSizes(true);
-    leftLayout->addWidget(m_accounts, 1);
-
-    m_cooldown = new QLabel(left);
-    m_cooldown->setWordWrap(true);
-    m_cooldown->setTextFormat(Qt::PlainText);
-    leftLayout->addWidget(m_cooldown);
-
-    auto* accountButtons = new QHBoxLayout();
-    auto* addButton = new QPushButton(tr("Add account"), left);
-    auto* editButton = new QPushButton(tr("Edit"), left);
-    auto* importButton = new QPushButton(tr("Import"), left);
-    auto* removeButton = new QPushButton(tr("Remove"), left);
-    accountButtons->addWidget(addButton);
-    accountButtons->addWidget(editButton);
-    accountButtons->addWidget(importButton);
-    accountButtons->addStretch(1);
-    accountButtons->addWidget(removeButton);
-    leftLayout->addLayout(accountButtons);
-
-    connect(addButton, &QPushButton::clicked, this, &MainWindow::onAddAccount);
-    connect(editButton, &QPushButton::clicked, this, &MainWindow::onEditAccount);
-    connect(removeButton, &QPushButton::clicked, this, &MainWindow::onRemoveAccount);
-    connect(importButton, &QPushButton::clicked, this, &MainWindow::onImportAccounts);
-    connect(m_accounts, &QListWidget::itemSelectionChanged, this, &MainWindow::onAccountSelectionChanged);
-    connect(m_accountFilter, &QLineEdit::textChanged, this, &MainWindow::onAccountFilterChanged);
-    m_accounts->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(m_accounts, &QListWidget::customContextMenuRequested, this, &MainWindow::onAccountMenu);
-
-    // --- middle: the mail ------------------------------------------------
-    m_messageArea = new QStackedWidget(splitter);
-
-    m_messages = new QTableWidget(m_messageArea);
-    m_messages->setColumnCount(5);
-    m_messages->setHorizontalHeaderLabels({tr("Account"), tr("From"), tr("Subject"), tr("Date"), QString()});
-    m_messages->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    m_messages->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Interactive);
-    m_messages->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
-    m_messages->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    m_messages->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Fixed);
-    m_messages->horizontalHeader()->resizeSection(4, 26);
-    m_messages->horizontalHeader()->setSectionsClickable(true);
-    m_messages->verticalHeader()->setVisible(false);
-    m_messages->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_messages->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_messages->setShowGrid(false);
-    m_messages->setAlternatingRowColors(false);
-    m_messages->setWordWrap(false);
-    m_messageArea->addWidget(m_messages);
-
-    m_messageHint = new QLabel(tr("No mail here yet.\n\nPress Refresh all (Ctrl+R) to fetch the mail of "
-                                  "every account."), m_messageArea);
-    m_messageHint->setAlignment(Qt::AlignCenter);
-    m_messageHint->setWordWrap(true);
-    m_messageArea->addWidget(m_messageHint);
-    m_messageArea->setCurrentWidget(m_messageHint);
-
-    connect(m_messages, &QTableWidget::itemSelectionChanged, this, &MainWindow::onMessageSelectionChanged);
-    connect(m_messages->horizontalHeader(), &QHeaderView::sectionClicked, this, &MainWindow::onSortColumn);
-
-    // --- right: the message ----------------------------------------------
-    auto* right = new QWidget(splitter);
+    // --- the right of the window -------------------------------------------
+    auto* right = new QWidget(central);
+    right->setObjectName(QStringLiteral("content"));
+    right->setStyleSheet(QStringLiteral("#content { background: %1; }")
+                             .arg(Theme::background().name()));
     auto* rightLayout = new QVBoxLayout(right);
     rightLayout->setContentsMargins(0, 0, 0, 0);
-    rightLayout->setSpacing(6);
+    rightLayout->setSpacing(0);
 
-    m_readerHeader = new QLabel(right);
-    m_readerHeader->setTextFormat(Qt::RichText);
-    m_readerHeader->setWordWrap(true);
-    m_readerHeader->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_readerHeader->setVisible(false);
-    rightLayout->addWidget(m_readerHeader);
+    // The bar on top with the search field and the actions of the program.
+    auto* topBar = new QWidget(right);
+    topBar->setFixedHeight(58);
+    topBar->setStyleSheet(QStringLiteral("QWidget { background: %1; border-bottom: 1px solid %2; }")
+                               .arg(Theme::background().name(), Theme::border().name()));
+    auto* topLayout = new QHBoxLayout(topBar);
+    topLayout->setContentsMargins(18, 10, 14, 10);
+    topLayout->setSpacing(8);
 
-    m_reader = new QTextBrowser(right);
-    m_reader->setOpenExternalLinks(true);
-    m_reader->setOpenLinks(false);
-    m_reader->setPlaceholderText(tr("Pick a message to read it."));
-    rightLayout->addWidget(m_reader, 1);
+    m_search = new QLineEdit(topBar);
+    m_search->setPlaceholderText(tr("Search mail (Ctrl+F)"));
+    m_search->setClearButtonEnabled(true);
+    m_search->setMinimumWidth(260);
+    m_search->setMaximumWidth(460);
+    m_search->addAction(Icons::icon(QStringLiteral("search"), Theme::textMuted(), 16),
+                        QLineEdit::LeadingPosition);
+    m_search->setStyleSheet(QStringLiteral("QLineEdit { background: %1; border: 1px solid %2; }")
+                                .arg(Theme::surface().name(), Theme::border().name()));
+    connect(m_search, &QLineEdit::textChanged, this, &MainWindow::onSearchChanged);
+    topLayout->addWidget(m_search);
 
-    m_attachments = new QListWidget(right);
-    m_attachments->setMaximumHeight(100);
-    m_attachments->setToolTip(tr("Attachments of the selected message"));
-    m_attachments->setVisible(false);
-    rightLayout->addWidget(m_attachments);
+    m_cooldown = new QLabel(topBar);
+    m_cooldown->setFont(Theme::font(12));
+    m_cooldown->setStyleSheet(QStringLiteral("color: %1; background: transparent;")
+                                  .arg(Theme::warning().name()));
+    topLayout->addWidget(m_cooldown);
+    topLayout->addStretch(1);
 
-    auto* saveAttachment = new QPushButton(tr("Save attachment"), right);
-    saveAttachment->setVisible(false);
-    rightLayout->addWidget(saveAttachment);
-    connect(saveAttachment, &QPushButton::clicked, this, &MainWindow::onSaveAttachment);
+    auto makeButton = [&](const QString& icon, const QString& tip) {
+        auto* button = new QToolButton(topBar);
+        button->setAccessibleName(tip);
+        button->setIcon(Icons::icon(icon, Theme::textSecondary(), 18));
+        button->setIconSize(QSize(18, 18));
+        button->setFixedSize(34, 34);
+        button->setToolTip(tip);
+        button->setCursor(Qt::PointingHandCursor);
+        button->setStyleSheet(QStringLiteral("QToolButton { border: none; border-radius: 8px; }"
+                                            "QToolButton:hover { background: %1; }")
+                                  .arg(Theme::surfaceHover().name()));
+        return button;
+    };
 
-    splitter->addWidget(left);
-    splitter->addWidget(m_messageArea);
-    splitter->addWidget(right);
+    auto* accountsButton = makeButton(QStringLiteral("user"), tr("Manage the accounts"));
+    connect(accountsButton, &QToolButton::clicked, this, &MainWindow::onAccountManager);
+    topLayout->addWidget(accountsButton);
+
+    auto* refreshButton = makeButton(QStringLiteral("refresh"), tr("Refresh every account (Ctrl+R)"));
+    connect(refreshButton, &QToolButton::clicked, this, &MainWindow::onRefreshAll);
+    topLayout->addWidget(refreshButton);
+
+    auto* writeButton = makeButton(QStringLiteral("compose"), tr("Write a message (Ctrl+N)"));
+    connect(writeButton, &QToolButton::clicked, this, &MainWindow::onCompose);
+    topLayout->addWidget(writeButton);
+
+    auto* settingsButton = makeButton(QStringLiteral("settings"), tr("Settings"));
+    connect(settingsButton, &QToolButton::clicked, this, &MainWindow::onSettings);
+    topLayout->addWidget(settingsButton);
+
+    rightLayout->addWidget(topBar);
+
+    // The mail and the reader.
+    auto* splitter = new QSplitter(Qt::Horizontal, right);
+    splitter->setChildrenCollapsible(false);
+    splitter->setHandleWidth(1);
+    splitter->setStyleSheet(QStringLiteral("QSplitter::handle { background: %1; }")
+                                .arg(Theme::border().name()));
+
+    m_messages = new MessageList(splitter);
+    m_messages->setStyleSheet(QStringLiteral("QWidget { background: %1; }")
+                                  .arg(Theme::background().name()));
+    connect(m_messages, &MessageList::messageActivated, this, &MainWindow::onMessageActivated);
+    connect(m_messages, &MessageList::refreshRequested, this, &MainWindow::onRefreshAccount);
+    connect(m_messages, &MessageList::markReadRequested, this, &MainWindow::onMarkRead);
+    connect(m_messages, &MessageList::deleteRequested, this, &MainWindow::onDeleteMessage);
+    connect(m_messages, &MessageList::starToggled, this, &MainWindow::onStarToggled);
+    connect(m_messages, &MessageList::filterChanged, this, &MainWindow::onFilterChanged);
+    splitter->addWidget(m_messages);
+
+    m_reader = new Reader(splitter);
+    connect(m_reader, &Reader::retryRequested, this, [this]() {
+        if (!m_currentMessageId.isEmpty())
+            m_service->fetchBody(m_currentMessageId);
+    });
+    connect(m_reader, &Reader::replyRequested, this, &MainWindow::onReply);
+    connect(m_reader, &Reader::forwardRequested, this, &MainWindow::onCompose);
+    connect(m_reader, &Reader::starToggled, this, [this](bool starred) {
+        if (!m_currentMessageId.isEmpty())
+            onStarToggled(m_currentMessageId, starred);
+    });
+    connect(m_reader, &Reader::deleteRequested, this, &MainWindow::onDeleteMessage);
+    splitter->addWidget(m_reader);
+
     splitter->setStretchFactor(0, 0);
-    splitter->setStretchFactor(1, 3);
-    splitter->setStretchFactor(2, 4);
-    splitter->setSizes({270, 620, 700});
-    layout->addWidget(splitter);
+    splitter->setStretchFactor(1, 1);
+    splitter->setSizes({440, 1000});
+    rightLayout->addWidget(splitter, 1);
+
+    layout->addWidget(right, 1);
+
+    // The toasts live above everything in the bottom right corner.
+    m_toasts = new QStackedWidget(this);
+    m_toasts->setFixedWidth(380);
 
     m_status = new QLabel(this);
+    m_status->setFont(Theme::font(11));
+    m_status->setStyleSheet(QStringLiteral("color: %1;").arg(Theme::textMuted().name()));
     statusBar()->addWidget(m_status);
+    statusBar()->setStyleSheet(QStringLiteral("QStatusBar { background: %1; border-top: 1px solid %2; }")
+                                   .arg(Theme::background().name(), Theme::border().name()));
 
-    // Ctrl+F puts the cursor in the search box.
-    auto* findShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_F), this);
-    connect(findShortcut, &QShortcut::activated, this, [this]() {
+    // Shortcuts.
+    auto* refresh = new QAction(this);
+    refresh->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_R));
+    connect(refresh, &QAction::triggered, this, &MainWindow::onRefreshAll);
+    addAction(refresh);
+
+    auto* write = new QAction(this);
+    write->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_N));
+    connect(write, &QAction::triggered, this, &MainWindow::onCompose);
+    addAction(write);
+
+    auto* find = new QAction(this);
+    find->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_F));
+    connect(find, &QAction::triggered, this, [this]() {
         m_search->setFocus();
         m_search->selectAll();
     });
+    addAction(find);
+
+    auto* refreshOne = new QAction(this);
+    refreshOne->setShortcut(QKeySequence(Qt::Key_F5));
+    connect(refreshOne, &QAction::triggered, this, &MainWindow::onRefreshAccount);
+    addAction(refreshOne);
 }
 
 void MainWindow::log(const QString& text)
@@ -408,164 +255,553 @@ void MainWindow::log(const QString& text)
     m_status->setText(text);
 }
 
-QString MainWindow::selectedMailboxId() const
+void MainWindow::toast(const QString& title, const QString& text, Toast::Kind kind)
 {
-    const QListWidgetItem* item = m_accounts->currentItem();
-    if (!item)
-        return {};
-    return item->data(Qt::UserRole).toString();
+    auto* card = new Toast(kind, title, text, this);
+    card->adjustSize();
+    card->move(width() - card->width() - 24, height() - card->height() - 44);
+    card->show();
+    card->showFor(kind == Toast::Kind::Error ? 12000 : 5000);
+    card->raise();
+    connect(card, &QObject::destroyed, this, [this, card]() { card->deleteLater(); });
 }
 
-void MainWindow::rebuildAccountList()
+
+void MainWindow::rebuildAccounts()
 {
-    const QString current = selectedMailboxId();
-    m_accounts->clear();
-
-    // The unified inbox: every account at once.
-    auto* all = new QListWidgetItem(tr("All accounts"), m_accounts);
-    all->setData(Qt::UserRole, QString());
-    all->setData(Qt::UserRole + 4, tr("All accounts"));
-    all->setData(Qt::UserRole + 5, true);
-    all->setToolTip(tr("Show the mail of every account in one list"));
-
-    int totalUnread = 0;
+    QList<Mailbox*> accounts;
+    for (Mailbox& mailbox : m_vault->state().mailboxes)
+        accounts << &mailbox;
+    m_sidebar->setAccounts(accounts);
     for (const Mailbox& mailbox : m_vault->state().mailboxes) {
         const int unseen = m_vault->state()
                                .settings.value(QStringLiteral("unseen.%1").arg(mailbox.id))
                                .toInt();
-        totalUnread += unseen;
-        const bool cooldown = mailbox.cooldownUntil.isValid()
-                              && mailbox.cooldownUntil > QDateTime::currentDateTime();
-
-        auto* item = new QListWidgetItem(mailbox.displayName.isEmpty() ? mailbox.address
-                                                                       : mailbox.displayName,
-                                         m_accounts);
-        item->setData(Qt::UserRole, mailbox.id);
-        item->setData(Qt::UserRole + 1, mailbox.providerId);
-        item->setData(Qt::UserRole + 2, unseen);
-        item->setData(Qt::UserRole + 3, cooldown);
-        item->setData(Qt::UserRole + 4, mailbox.displayName.isEmpty() ? mailbox.address
-                                                                     : mailbox.displayName);
-        item->setToolTip(QStringLiteral("%1\n%2").arg(mailbox.address, providerLabelFor(mailbox.providerId)));
+        m_sidebar->setUnread(mailbox.id, unseen);
     }
-    all->setData(Qt::UserRole + 2, totalUnread);
+}
 
-    // Keep the selection where it was, the unified inbox is the default.
-    int rowToSelect = 0;
-    for (int i = 0; i < m_accounts->count(); ++i) {
-        if (m_accounts->item(i)->data(Qt::UserRole).toString() == current) {
-            rowToSelect = i;
+QVector<Message> MainWindow::messagesForView() const
+{
+    QVector<Message> out;
+    for (const Message& message : m_vault->state().messages) {
+        if (!m_accountFilter.isEmpty() && message.mailboxId != m_accountFilter)
+            continue;
+        const QString kind = message.folderKind.isEmpty() ? QStringLiteral("inbox")
+                                                          : message.folderKind;
+        switch (m_view) {
+        case Sidebar::View::Inbox:
+            if (kind != QLatin1String("inbox"))
+                continue;
+            break;
+        case Sidebar::View::Sent:
+            if (kind != QLatin1String("sent"))
+                continue;
+            break;
+        case Sidebar::View::Drafts:
+            if (kind != QLatin1String("drafts"))
+                continue;
+            break;
+        case Sidebar::View::Spam:
+            if (kind != QLatin1String("junk"))
+                continue;
+            break;
+        case Sidebar::View::Trash:
+            if (kind != QLatin1String("trash"))
+                continue;
+            break;
+        default:
+            break;
+        }
+        out << message;
+    }
+    std::sort(out.begin(), out.end(), [](const Message& a, const Message& b) {
+        return a.date > b.date;
+    });
+    return out;
+}
+
+void MainWindow::rebuildMessages()
+{
+    QHash<QString, Mailbox> mailboxes;
+    for (const Mailbox& mailbox : m_vault->state().mailboxes)
+        mailboxes.insert(mailbox.id, mailbox);
+
+    m_messages->setAccountFilter(m_accountFilter);
+    m_messages->setSearchText(m_searchText);
+    m_messages->setMessages(messagesForView(), mailboxes);
+}
+
+void MainWindow::onViewChanged(Sidebar::View view)
+{
+    m_view = view;
+    if (view != Sidebar::View::AllAccounts && view != Sidebar::View::Inbox)
+        fetchFolderForView();
+    rebuildMessages();
+}
+
+void MainWindow::fetchFolderForView()
+{
+    static const QHash<int, QString> kinds = {
+        {int(Sidebar::View::Sent), QStringLiteral("sent")},
+        {int(Sidebar::View::Drafts), QStringLiteral("drafts")},
+        {int(Sidebar::View::Spam), QStringLiteral("junk")},
+        {int(Sidebar::View::Trash), QStringLiteral("trash")},
+    };
+    const QString kind = kinds.value(int(m_view));
+    if (kind.isEmpty())
+        return;
+
+    // The folder of the account is fetched when it is looked at, so a hundred
+    // accounts do not mean a hundred fetches on every refresh.
+    QStringList mailboxes;
+    if (!m_accountFilter.isEmpty())
+        mailboxes << m_accountFilter;
+    else
+        for (const Mailbox& mailbox : m_vault->state().mailboxes)
+            mailboxes << mailbox.id;
+
+    for (const QString& mailboxId : mailboxes) {
+        for (const Folder& folder : m_vault->state().folders) {
+            if (folder.mailboxId == mailboxId && folder.kind == kind) {
+                m_service->syncFolder(mailboxId, folder.name, kind);
+                break;
+            }
+        }
+    }
+}
+
+void MainWindow::onAccountSelected(const QString& mailboxId)
+{
+    m_accountFilter = mailboxId;
+    rebuildMessages();
+}
+
+void MainWindow::onFilterChanged(MessageList::Filter filter)
+{
+    Q_UNUSED(filter)
+    rebuildMessages();
+}
+
+void MainWindow::onSearchChanged(const QString& text)
+{
+    m_searchText = text;
+    m_messages->setSearchText(text);
+}
+
+void MainWindow::onMessageActivated(const QString& messageId)
+{
+    if (messageId.isEmpty())
+        return;
+    m_currentMessageId = messageId;
+
+    if (m_bodyCache.contains(messageId)) {
+        showMessage(messageById(messageId));
+        return;
+    }
+    m_reader->showEmpty();
+    m_service->fetchBody(messageId);
+}
+
+void MainWindow::onBodyReady(const QString& messageId, const QByteArray& raw)
+{
+    m_bodyCache.insert(messageId, raw);
+    if (messageId != m_currentMessageId)
+        return;
+    showMessage(messageById(messageId));
+}
+
+void MainWindow::onBodyFailed(const QString& messageId, const QString& error)
+{
+    if (messageId != m_currentMessageId)
+        return;
+    m_reader->showError(tr("Unable to load this message"),
+                        tr("We could not get this mail. Check the connection of the account "
+                           "and try again."),
+                        [this, messageId]() { m_service->fetchBody(messageId); });
+    log(error);
+}
+
+void MainWindow::showMessage(const Message& message)
+{
+    if (m_currentMessageId.isEmpty())
+        return;
+    const QByteArray raw = m_bodyCache.value(m_currentMessageId);
+    if (raw.isEmpty())
+        return;
+    m_reader->showMessage(message, parseMime(raw));
+
+    // The mail counts as read from now on.
+    if (!message.flags.contains(QStringLiteral("\\Seen"))) {
+        for (Message& stored : m_vault->state().messages) {
+            if (stored.id == m_currentMessageId) {
+                stored.flags = stored.flags + QStringLiteral(" \\Seen");
+                break;
+            }
+        }
+        QString error;
+        m_vault->save(&error);
+        rebuildMessages();
+    }
+}
+
+void MainWindow::onStarToggled(const QString& messageId, bool starred)
+{
+    m_starred.insert(messageId, starred);
+    rebuildMessages();
+}
+
+void MainWindow::onMarkRead()
+{
+    if (m_currentMessageId.isEmpty())
+        return;
+    for (Message& stored : m_vault->state().messages) {
+        if (stored.id == m_currentMessageId) {
+            if (!stored.flags.contains(QStringLiteral("\\Seen")))
+                stored.flags = stored.flags + QStringLiteral(" \\Seen");
             break;
         }
     }
-    m_accounts->setCurrentRow(rowToSelect);
-    onAccountFilterChanged();
+    QString error;
+    m_vault->save(&error);
+    rebuildMessages();
+}
+
+void MainWindow::onDeleteMessage()
+{
+    if (m_currentMessageId.isEmpty())
+        return;
+    const QString id = m_currentMessageId;
+    for (int i = 0; i < m_vault->state().messages.size(); ++i) {
+        if (m_vault->state().messages.at(i).id == id) {
+            m_vault->state().messages.remove(i);
+            break;
+        }
+    }
+    QString error;
+    m_vault->save(&error);
+    m_currentMessageId.clear();
+    m_reader->showEmpty();
+    rebuildMessages();
+    toast(tr("Message moved to the trash"), tr("You can get it back from the trash."),
+          Toast::Kind::Information);
+}
+
+void MainWindow::onRefreshAll()
+{
+    log(tr("Refreshing every account..."));
+    m_messages->setBusy(true);
+    m_service->syncAll();
+}
+
+void MainWindow::onRefreshAccount()
+{
+    const QString id = selectedMailboxId();
+    if (id.isEmpty()) {
+        onRefreshAll();
+        return;
+    }
+    m_messages->setBusy(true);
+    m_service->syncMailbox(id);
+}
+
+void MainWindow::onSyncFinished(const QString& mailboxId, bool ok, const QString& error)
+{
+    m_messages->setBusy(false);
+    if (!ok) {
+        const Mailbox* mailbox = m_vault->state().mailboxById(mailboxId);
+        toast(tr("Could not refresh"), tr("%1: %2").arg(mailbox ? mailbox->address : mailboxId, error),
+              Toast::Kind::Error);
+        return;
+    }
+    rebuildAccounts();
+    rebuildMessages();
+    log(tr("Refreshed."));
+}
+
+void MainWindow::onAddAccount()
+{
+    MailboxDialog dialog(m_vault, Mailbox(), MailboxDialog::AddAccount, false, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    const Mailbox mailbox = dialog.mailbox();
+    applyMailbox(mailbox, true);
+    storeTokens(mailbox.id, dialog.tokens());
+
+    if (!dialog.signInError().isEmpty()) {
+        toast(tr("The account was added, the sign in failed"), dialog.signInError(),
+              Toast::Kind::Warning);
+        return;
+    }
+
+    const bool hasToken = m_vault->state().tokenFor(mailbox.id) != nullptr;
+    if (!hasToken && mailbox.secret.isEmpty()) {
+        toast(tr("The account was added"),
+              tr("%1 cannot read mail yet. Put the client id of your %2 application in the "
+                 "settings, then sign in to the account again.")
+                  .arg(mailbox.address, providerLabelFor(mailbox.providerId)),
+              Toast::Kind::Information);
+        return;
+    }
+    m_service->syncMailbox(mailbox.id);
+}
+
+void MainWindow::onEditAccount()
+{
+    const QString id = selectedMailboxId();
+    if (id.isEmpty()) {
+        QMessageBox::information(this, tr("No account picked"),
+                                 tr("Pick one account in the list first."));
+        return;
+    }
+    const Mailbox* mailbox = m_vault->state().mailboxById(id);
+    if (!mailbox)
+        return;
+
+    MailboxDialog dialog(m_vault, *mailbox, MailboxDialog::EditAccount, false, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    const Mailbox updated = dialog.mailbox();
+    const bool startedCooldown = !mailbox->cooldownUntil.isValid() && updated.cooldownUntil.isValid();
+    applyMailbox(updated, false);
+    storeTokens(updated.id, dialog.tokens());
     showCooldownStatus();
-}
 
-void MainWindow::onAccountFilterChanged()
-{
-    const QString filter = m_accountFilter->text().trimmed();
-    for (int i = 0; i < m_accounts->count(); ++i) {
-        QListWidgetItem* item = m_accounts->item(i);
-        if (i == 0)
-            continue;   // the unified inbox is always there
-        const QString name = item->data(Qt::UserRole + 4).toString();
-        const QString address = item->toolTip().section(QChar('\n'), 0, 0);
-        const bool hit = filter.isEmpty() || name.contains(filter, Qt::CaseInsensitive)
-                         || address.contains(filter, Qt::CaseInsensitive);
-        m_accounts->setRowHidden(i, !hit);
+    if (startedCooldown) {
+        toast(tr("Cooldown started"),
+              tr("The details of %1 cannot be changed until %2.")
+                  .arg(updated.displayName.isEmpty() ? updated.address : updated.displayName,
+                       updated.cooldownUntil.toString(QStringLiteral("dd MMM yyyy"))),
+              Toast::Kind::Information);
     }
+    if (!dialog.signInError().isEmpty())
+        toast(tr("The sign in failed"), dialog.signInError(), Toast::Kind::Error);
 }
 
-void MainWindow::rebuildMessageList()
+void MainWindow::onSignInAgain()
 {
-    const QString filter = m_search->text().trimmed();
-    const QString onlyAccount = selectedMailboxId();
+    const QString id = selectedMailboxId();
+    if (id.isEmpty())
+        return;
+    const Mailbox* mailbox = m_vault->state().mailboxById(id);
+    if (!mailbox)
+        return;
 
-    QVector<Message> messages = m_vault->state().messages;
+    MailboxDialog dialog(m_vault, *mailbox, MailboxDialog::EditAccount, true, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    if (dialog.hasTokens()) {
+        storeTokens(mailbox->id, dialog.tokens());
+        QString error;
+        m_vault->save(&error);
+        toast(tr("Signed in"), tr("%1 is connected.").arg(mailbox->address), Toast::Kind::Success);
+    }
+    if (!dialog.signInError().isEmpty())
+        toast(tr("The sign in failed"), dialog.signInError(), Toast::Kind::Error);
+}
 
-    std::sort(messages.begin(), messages.end(), [this](const Message& a, const Message& b) {
-        int result = 0;
-        switch (m_sortColumn) {
-        case 0: result = a.mailboxId.compare(b.mailboxId); break;
-        case 1: result = senderName(a.from).compare(senderName(b.from), Qt::CaseInsensitive); break;
-        case 2: result = a.subject.compare(b.subject, Qt::CaseInsensitive); break;
-        default: result = (a.date == b.date) ? 0 : (a.date < b.date ? -1 : 1); break;
-        }
-        if (result == 0)
-            result = (a.date == b.date) ? 0 : (a.date < b.date ? -1 : 1);
-        return m_sortAscending ? result < 0 : result > 0;
+void MainWindow::onRemoveAccount()
+{
+    const QString id = selectedMailboxId();
+    if (id.isEmpty()) {
+        QMessageBox::information(this, tr("No account picked"),
+                                 tr("Pick the account you want to remove in the list first."));
+        return;
+    }
+    const Mailbox* mailbox = m_vault->state().mailboxById(id);
+    if (!mailbox)
+        return;
+
+    if (mailbox->cooldownUntil.isValid() && mailbox->cooldownUntil > QDateTime::currentDateTime()) {
+        QMessageBox::warning(
+            this, tr("The account is on cooldown"),
+            tr("The details of %1 cannot be changed until %2. The cooldown is there to "
+               "protect the account, removing it now can get the account locked.")
+                .arg(mailbox->address,
+                     mailbox->cooldownUntil.toString(QStringLiteral("dd MMM yyyy"))));
+        return;
+    }
+
+    if (QMessageBox::question(this, tr("Remove the account"),
+                              tr("Remove %1 from MMC?\n\nThe account itself is not deleted at the "
+                                 "provider, but the mail that was read is removed from the vault.")
+                                  .arg(mailbox->address))
+        != QMessageBox::Yes)
+        return;
+
+    m_vault->state().removeMailbox(id);
+    QString error;
+    m_vault->save(&error);
+    m_accountFilter.clear();
+    rebuildAccounts();
+    rebuildMessages();
+}
+
+void MainWindow::onAccountMenu(const QString& mailboxId, const QPoint& position)
+{
+    QMenu menu(this);
+    QAction* edit = menu.addAction(tr("Edit account"));
+    QAction* signIn = menu.addAction(tr("Sign in again"));
+    QAction* refresh = menu.addAction(tr("Refresh this account"));
+    QAction* webmail = menu.addAction(tr("Open webmail"));
+    menu.addSeparator();
+    QAction* remove = menu.addAction(tr("Remove account"));
+
+    QAction* chosen = menu.exec(position);
+    if (!chosen)
+        return;
+
+    m_accountFilter = mailboxId;
+    m_sidebar->setSelectedAccountId(mailboxId);
+    if (chosen == edit)
+        onEditAccount();
+    else if (chosen == signIn)
+        onSignInAgain();
+    else if (chosen == refresh)
+        onRefreshAccount();
+    else if (chosen == webmail)
+        onOpenWebmail();
+    else if (chosen == remove)
+        onRemoveAccount();
+}
+
+void MainWindow::onImportAccounts()
+{
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("Import accounts"), QString(),
+        tr("Text files (*.txt *.csv);;All files (*)"));
+    if (path.isEmpty())
+        return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        QMessageBox::warning(this, tr("Cannot read the file"), file.errorString());
+        return;
+    }
+    const ImportResult result = importMailboxesFromText(file.readAll());
+
+    if (!result.errors.isEmpty()) {
+        QMessageBox::warning(this, tr("Some lines were skipped"),
+                             result.errors.join(QStringLiteral("\n")));
+    }
+    if (result.mailboxes.isEmpty())
+        return;
+
+    for (const Mailbox& mailbox : result.mailboxes)
+        m_vault->state().mailboxes.append(mailbox);
+    QString error;
+    m_vault->save(&error);
+    rebuildAccounts();
+    toast(tr("Accounts imported"), tr("%1 accounts were added.").arg(result.mailboxes.size()),
+          Toast::Kind::Success);
+}
+
+void MainWindow::onCompose()
+{
+    if (m_vault->state().mailboxes.isEmpty()) {
+        QMessageBox::information(this, tr("No accounts"),
+                                 tr("Add an account before you write a message."));
+        return;
+    }
+    ComposeDialog dialog(m_vault->state().mailboxes, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    if (dialog.to().isEmpty()) {
+        QMessageBox::warning(this, tr("No recipient"), tr("Who should get this message?"));
+        return;
+    }
+    m_service->sendMessage(dialog.mailboxId(), dialog.to(), dialog.cc(), dialog.subject(),
+                           dialog.bodyText(), QString(), dialog.attachmentData(),
+                           dialog.attachmentNames());
+}
+
+void MainWindow::onReply()
+{
+    if (m_vault->state().mailboxes.isEmpty())
+        return;
+    const Message message = messageById(m_currentMessageId);
+    if (message.id.isEmpty())
+        return;
+
+    ComposeDialog dialog(m_vault->state().mailboxes, this);
+    dialog.setRecipient(message.from);
+    dialog.setSubject(message.subject.startsWith(QStringLiteral("Re:"), Qt::CaseInsensitive)
+                          ? message.subject
+                          : QStringLiteral("Re: ") + message.subject);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    m_service->sendMessage(dialog.mailboxId(), dialog.to(), dialog.cc(), dialog.subject(),
+                           dialog.bodyText(), QString(), dialog.attachmentData(),
+                           dialog.attachmentNames());
+}
+
+void MainWindow::onSendFinished(bool ok, const QString& error)
+{
+    if (ok) {
+        toast(tr("Message sent"), tr("The mail is on its way."), Toast::Kind::Success);
+        return;
+    }
+    toast(tr("The message was not sent"), error, Toast::Kind::Error);
+}
+
+void MainWindow::onOpenWebmail()
+{
+    const QString id = selectedMailboxId();
+    if (id.isEmpty()) {
+        QMessageBox::information(this, tr("No account"),
+                                 tr("Pick one account in the list first."));
+        return;
+    }
+    const Mailbox* mailbox = m_vault->state().mailboxById(id);
+    if (!mailbox)
+        return;
+    const QString url = webmailUrlFor(mailbox->providerId);
+    if (!url.isEmpty())
+        QDesktopServices::openUrl(QUrl(url));
+}
+
+void MainWindow::onAccountManager()
+{
+    AccountManager dialog(m_vault, this);
+    connect(&dialog, &AccountManager::accountChanged, this, [this]() {
+        rebuildAccounts();
+        rebuildMessages();
     });
-
-    int row = 0;
-    for (const Message& message : messages) {
-        if (!onlyAccount.isEmpty() && message.mailboxId != onlyAccount)
-            continue;
-        if (!filter.isEmpty()) {
-            const bool hit = message.subject.contains(filter, Qt::CaseInsensitive)
-                             || message.from.contains(filter, Qt::CaseInsensitive)
-                             || message.to.contains(filter, Qt::CaseInsensitive);
-            if (!hit)
-                continue;
-        }
-
-        const Mailbox* mailbox = m_vault->state().mailboxById(message.mailboxId);
-        const QString account = mailbox
-                                    ? (mailbox->displayName.isEmpty() ? mailbox->address
-                                                                      : mailbox->displayName)
-                                    : message.mailboxId;
-        const bool unread = !message.flags.contains(QStringLiteral("\\Seen"));
-
-        m_messages->insertRow(row);
-
-        auto* accountItem = new QTableWidgetItem(account);
-        accountItem->setData(Qt::UserRole, message.id);
-        if (mailbox) {
-            accountItem->setIcon(providerIcon(mailbox->providerId, 16));
-            accountItem->setForeground(providerColor(mailbox->providerId));
-        }
-        m_messages->setItem(row, 0, accountItem);
-
-        auto* fromItem = new QTableWidgetItem(senderName(message.from));
-        fromItem->setData(Qt::UserRole, message.id);
-        fromItem->setToolTip(decodeHeaderValue(message.from));
-        m_messages->setItem(row, 1, fromItem);
-
-        auto* subjectItem = new QTableWidgetItem(decodeHeaderValue(message.subject));
-        subjectItem->setData(Qt::UserRole, message.id);
-        if (unread) {
-            QFont font = subjectItem->font();
-            font.setBold(true);
-            subjectItem->setFont(font);
-        }
-        m_messages->setItem(row, 2, subjectItem);
-
-        m_messages->setItem(row, 3, new QTableWidgetItem(formatDate(message.date)));
-        m_messages->setItem(row, 4, new QTableWidgetItem(QString()));
-        row++;
-    }
-
-    m_messages->setRowCount(row);
-    m_messageArea->setCurrentWidget(row > 0 ? static_cast<QWidget*>(m_messages) : static_cast<QWidget*>(m_messageHint));
-    if (row == 0) {
-        m_messageHint->setText(m_accounts->count() <= 1
-                                    ? tr("No accounts yet.\n\nPress Add account to connect one.")
-                                    : tr("No mail here yet.\n\nPress Refresh all (Ctrl+R) to fetch the "
-                                         "mail of every account."));
-    }
+    dialog.exec();
 }
 
-void MainWindow::onSortColumn(int column)
+void MainWindow::onSettings()
 {
-    if (column == m_sortColumn)
-        m_sortAscending = !m_sortAscending;
-    else {
-        m_sortColumn = column;
-        m_sortAscending = column != 3;   // the newest first for the date
-    }
-    rebuildMessageList();
+    SettingsDialog dialog(m_vault, this);
+    dialog.exec();
+    rebuildAccounts();
+    rebuildMessages();
 }
+
+void MainWindow::showCooldownStatus()
+{
+    const Mailbox* mailbox = m_vault->state().mailboxById(m_accountFilter);
+    if (!mailbox || !mailbox->cooldownUntil.isValid()) {
+        m_cooldown->clear();
+        return;
+    }
+    const qint64 seconds = QDateTime::currentDateTime().secsTo(mailbox->cooldownUntil);
+    if (seconds <= 0) {
+        m_cooldown->setText(tr("%1 can be changed again").arg(mailbox->displayName));
+        return;
+    }
+    m_cooldown->setText(tr("%1 is on cooldown, %2 day(s) left")
+                            .arg(mailbox->displayName)
+                            .arg(seconds / 86400));
+}
+
+QString MainWindow::selectedMailboxId() const
+{
+    return m_accountFilter;
+}
+
 
 Message MainWindow::messageById(const QString& id) const
 {
@@ -573,37 +809,6 @@ Message MainWindow::messageById(const QString& id) const
         if (message.id == id)
             return message;
     return Message();
-}
-
-void MainWindow::showCooldownStatus()
-{
-    const QString id = selectedMailboxId();
-    const Mailbox* mailbox = m_vault->state().mailboxById(id);
-    if (!mailbox) {
-        m_cooldown->clear();
-        return;
-    }
-    if (!mailbox->cooldownUntil.isValid()) {
-        m_cooldown->setText(mailbox->cooldownNote);
-        return;
-    }
-    const qint64 seconds = QDateTime::currentDateTime().secsTo(mailbox->cooldownUntil);
-    if (seconds <= 0) {
-        m_cooldown->setText(tr("%1\nThe cooldown is over, the account details can be changed again.")
-                                .arg(mailbox->cooldownNote));
-        return;
-    }
-    const int days = static_cast<int>(seconds / 86400);
-    m_cooldown->setText(tr("%1\nDetails cannot be changed for %2 more day(s) (until %3).")
-                            .arg(mailbox->cooldownNote)
-                            .arg(days)
-                            .arg(mailbox->cooldownUntil.toString(QStringLiteral("dd MMM yyyy"))));
-}
-
-void MainWindow::onAccountSelectionChanged()
-{
-    rebuildMessageList();
-    showCooldownStatus();
 }
 
 void MainWindow::storeTokens(const QString& mailboxId, const OAuth2Tokens& tokens)
@@ -640,455 +845,8 @@ void MainWindow::applyMailbox(const Mailbox& mailbox, bool isNew)
     QString error;
     if (!m_vault->save(&error))
         log(error);
-    rebuildAccountList();
-    rebuildMessageList();
-}
-
-void MainWindow::onAddAccount()
-{
-    MailboxDialog dialog(m_vault, Mailbox(), MailboxDialog::AddAccount, false, this);
-    if (dialog.exec() != QDialog::Accepted)
-        return;
-
-    const Mailbox mailbox = dialog.mailbox();
-    applyMailbox(mailbox, true);
-    storeTokens(mailbox.id, dialog.tokens());
-
-    if (!dialog.signInError().isEmpty()) {
-        QMessageBox::warning(
-            this, tr("The account was added, but the sign in failed"),
-            tr("%1\n\nThe account is in the list, you can try the sign in again by right "
-               "clicking it.").arg(dialog.signInError()));
-        return;
-    }
-
-    const bool hasToken = m_vault->state().tokenFor(mailbox.id) != nullptr;
-    if (!hasToken && mailbox.secret.isEmpty()) {
-        QMessageBox::information(
-            this, tr("The account was added"),
-            tr("%1 is in the list.\n\nIt cannot read mail yet. Open Settings and put in the "
-               "client id of your %2 application, then right click the account and choose "
-               "'Sign in again'.").arg(mailbox.address, providerLabelFor(mailbox.providerId)));
-        return;
-    }
-
-    // The account is connected, so fetch the first mail right away.
-    log(tr("Fetching the first mail of %1...").arg(mailbox.address));
-    m_service->syncMailbox(mailbox.id);
-}
-
-void MainWindow::onEditAccount()
-{
-    const QString id = selectedMailboxId();
-    if (id.isEmpty()) {
-        QMessageBox::information(this, tr("No account picked"),
-                                 tr("Pick one account in the list first."));
-        return;
-    }
-    const Mailbox* mailbox = m_vault->state().mailboxById(id);
-    if (!mailbox)
-        return;
-
-    MailboxDialog dialog(m_vault, *mailbox, MailboxDialog::EditAccount, false, this);
-    if (dialog.exec() != QDialog::Accepted)
-        return;
-
-    const Mailbox updated = dialog.mailbox();
-    const bool startedCooldown = !mailbox->cooldownUntil.isValid() && updated.cooldownUntil.isValid();
-    applyMailbox(updated, false);
-    storeTokens(updated.id, dialog.tokens());
-
-    if (startedCooldown) {
-        QMessageBox::information(
-            this, tr("Cooldown started"),
-            tr("The details of %1 cannot be changed until %2.")
-                .arg(updated.displayName.isEmpty() ? updated.address : updated.displayName,
-                     updated.cooldownUntil.toString(QStringLiteral("dd MMM yyyy"))));
-    }
-    if (!dialog.signInError().isEmpty())
-        QMessageBox::warning(this, tr("The sign in failed"), dialog.signInError());
-}
-
-void MainWindow::onRemoveAccount()
-{
-    const QString id = selectedMailboxId();
-    if (id.isEmpty()) {
-        QMessageBox::information(this, tr("No account picked"),
-                                 tr("Pick the account you want to remove in the list first."));
-        return;
-    }
-    const Mailbox* mailbox = m_vault->state().mailboxById(id);
-    if (!mailbox)
-        return;
-
-    if (mailbox->cooldownUntil.isValid() && mailbox->cooldownUntil > QDateTime::currentDateTime()) {
-        QMessageBox::warning(
-            this, tr("The account is on cooldown"),
-            tr("The details of %1 cannot be changed until %2. The cooldown is there to "
-               "protect the account, removing it now can get the account locked.")
-                .arg(mailbox->address,
-                     mailbox->cooldownUntil.toString(QStringLiteral("dd MMM yyyy"))));
-        return;
-    }
-
-    if (QMessageBox::question(this, tr("Remove the account"),
-                              tr("Remove %1 from the vault? The account itself is not deleted.")
-                                  .arg(mailbox->address))
-        != QMessageBox::Yes)
-        return;
-
-    m_vault->state().removeMailbox(id);
-    QString error;
-    if (!m_vault->save(&error))
-        log(error);
-    rebuildAccountList();
-    rebuildMessageList();
-}
-
-void MainWindow::onSignInAgain()
-{
-    const QString id = selectedMailboxId();
-    if (id.isEmpty()) {
-        QMessageBox::information(this, tr("No account picked"),
-                                 tr("Pick the account in the list first."));
-        return;
-    }
-    const Mailbox* mailbox = m_vault->state().mailboxById(id);
-    if (!mailbox)
-        return;
-
-    MailboxDialog dialog(m_vault, *mailbox, MailboxDialog::EditAccount, true, this);
-    if (dialog.exec() != QDialog::Accepted)
-        return;
-    if (dialog.hasTokens()) {
-        storeTokens(mailbox->id, dialog.tokens());
-        QString error;
-        m_vault->save(&error);
-        log(tr("Signed in."));
-    }
-    if (!dialog.signInError().isEmpty())
-        QMessageBox::warning(this, tr("The sign in failed"), dialog.signInError());
-}
-
-void MainWindow::onAccountMenu()
-{
-    const QString id = selectedMailboxId();
-    QMenu menu(this);
-    QAction* edit = menu.addAction(tr("Edit account"));
-    QAction* signIn = menu.addAction(tr("Sign in again"));
-    QAction* webmail = menu.addAction(tr("Open webmail"));
-    menu.addSeparator();
-    QAction* remove = menu.addAction(tr("Remove account"));
-    if (id.isEmpty()) {
-        edit->setEnabled(false);
-        signIn->setEnabled(false);
-        webmail->setEnabled(false);
-        remove->setEnabled(false);
-    }
-
-    QAction* chosen = menu.exec(QCursor::pos());
-    if (!chosen)
-        return;
-    if (chosen == edit) {
-        onEditAccount();
-    } else if (chosen == signIn) {
-        onSignInAgain();
-    } else if (chosen == webmail) {
-        onOpenWebmail();
-    } else if (chosen == remove) {
-        onRemoveAccount();
-    }
-}
-
-void MainWindow::onImportAccounts()
-{
-    const QString path = QFileDialog::getOpenFileName(
-        this, tr("Import accounts"), QString(),
-        tr("Text files (*.txt *.csv);;All files (*)"));
-    if (path.isEmpty())
-        return;
-
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        QMessageBox::warning(this, tr("Cannot read the file"), file.errorString());
-        return;
-    }
-    const ImportResult result = importMailboxesFromText(file.readAll());
-
-    if (!result.errors.isEmpty()) {
-        QMessageBox::warning(this, tr("Some lines were skipped"),
-                             result.errors.join(QStringLiteral("\n")));
-    }
-    if (result.mailboxes.isEmpty())
-        return;
-
-    for (const Mailbox& mailbox : result.mailboxes)
-        m_vault->state().mailboxes.append(mailbox);
-    QString error;
-    if (!m_vault->save(&error))
-        log(error);
-    rebuildAccountList();
-    log(tr("%1 accounts imported.").arg(result.mailboxes.size()));
-}
-
-void MainWindow::onRefreshAll()
-{
-    log(tr("Refreshing every account..."));
-    m_service->syncAll();
-}
-
-void MainWindow::onRefreshAccount()
-{
-    const QString id = selectedMailboxId();
-    if (id.isEmpty()) {
-        onRefreshAll();
-        return;
-    }
-    log(tr("Refreshing..."));
-    m_service->syncMailbox(id);
-}
-
-void MainWindow::onSyncFinished(const QString& mailboxId, bool ok, const QString& error)
-{
-    if (!ok) {
-        const Mailbox* mailbox = m_vault->state().mailboxById(mailboxId);
-        log(tr("%1: %2").arg(mailbox ? mailbox->address : mailboxId, error));
-        return;
-    }
-    rebuildAccountList();
-    rebuildMessageList();
-    log(tr("Refreshed."));
-}
-
-void MainWindow::onMessageSelectionChanged()
-{
-    const auto items = m_messages->selectedItems();
-    if (items.isEmpty())
-        return;
-    const QString id = items.first()->data(Qt::UserRole).toString();
-    if (id.isEmpty() || id == m_currentMessageId)
-        return;
-    m_currentMessageId = id;
-
-    if (m_bodyCache.contains(id)) {
-        showMessageBody(parseMime(m_bodyCache.value(id)), m_bodyCache.value(id));
-        return;
-    }
-    m_readerHeader->setVisible(false);
-    m_reader->setPlainText(tr("Fetching the message..."));
-    m_service->fetchBody(id);
-}
-
-void MainWindow::onBodyReady(const QString& messageId, const QByteArray& raw)
-{
-    m_bodyCache.insert(messageId, raw);
-    if (messageId != m_currentMessageId)
-        return;
-    showMessageBody(parseMime(raw), raw);
-}
-
-void MainWindow::onBodyFailed(const QString& messageId, const QString& error)
-{
-    if (messageId != m_currentMessageId)
-        return;
-    m_readerHeader->setVisible(false);
-    m_reader->setPlainText(error);
-    log(error);
-}
-
-void MainWindow::showMessageBody(const ParsedMessage& parsed, const QByteArray& raw)
-{
-    m_attachments->clear();
-    m_attachments->setVisible(false);
-
-    const Message message = messageById(m_currentMessageId);
-    const QString from = decodeHeaderValue(parsed.header(QStringLiteral("from")));
-    const QString to = decodeHeaderValue(parsed.header(QStringLiteral("to")));
-    const QString subject = decodeHeaderValue(parsed.header(QStringLiteral("subject")));
-    const QString date = decodeHeaderValue(parsed.header(QStringLiteral("date")));
-
-    QString header;
-    header += QStringLiteral("<div style='margin-bottom:6px'><b>%1</b></div>")
-                  .arg(subject.toHtmlEscaped());
-    if (!from.isEmpty())
-        header += QStringLiteral("From: %1<br>").arg(from.toHtmlEscaped());
-    if (!to.isEmpty())
-        header += QStringLiteral("To: %1<br>").arg(to.toHtmlEscaped());
-    if (!date.isEmpty())
-        header += QStringLiteral("Date: %1<br>").arg(date.toHtmlEscaped());
-    m_readerHeader->setText(header);
-    m_readerHeader->setVisible(true);
-
-    const QString html = parsed.bodyHtml();
-    if (!html.isEmpty()) {
-        m_reader->setHtml(html);
-    } else {
-        m_reader->setPlainText(parsed.bodyText().isEmpty() ? QString::fromUtf8(raw) : parsed.bodyText());
-    }
-
-    const QVector<MimePart> attachments = parsed.attachments();
-    if (!attachments.isEmpty()) {
-        for (const MimePart& part : attachments)
-            m_attachments->addItem(part.filename.isEmpty() ? tr("attachment") : part.filename);
-        m_attachments->setVisible(true);
-    }
-
-    // The message counts as read in MMC from now on.
-    if (!message.flags.contains(QStringLiteral("\\Seen"))) {
-        for (Message& stored : m_vault->state().messages) {
-            if (stored.id == m_currentMessageId) {
-                stored.flags = stored.flags + QStringLiteral(" \\Seen");
-                break;
-            }
-        }
-        QString error;
-        m_vault->save(&error);
-        rebuildMessageList();
-    }
-}
-
-void MainWindow::onSaveAttachment()
-{
-    const QListWidgetItem* item = m_attachments->currentItem();
-    if (!item || m_currentMessageId.isEmpty())
-        return;
-    const QByteArray raw = m_bodyCache.value(m_currentMessageId);
-    if (raw.isEmpty())
-        return;
-    const ParsedMessage parsed = parseMime(raw);
-    const QVector<MimePart> attachments = parsed.attachments();
-    for (const MimePart& part : attachments) {
-        if (part.filename != item->text())
-            continue;
-        const QString path = QFileDialog::getSaveFileName(this, tr("Save attachment"),
-                                                          part.filename);
-        if (path.isEmpty())
-            return;
-        QFile file(path);
-        if (!file.open(QIODevice::WriteOnly)) {
-            QMessageBox::warning(this, tr("Cannot write the file"), file.errorString());
-            return;
-        }
-        file.write(part.data);
-        return;
-    }
-}
-
-void MainWindow::onCompose()
-{
-    if (m_vault->state().mailboxes.isEmpty()) {
-        QMessageBox::information(this, tr("No accounts"),
-                                 tr("Add an account before you write a message."));
-        return;
-    }
-    ComposeDialog dialog(m_vault->state().mailboxes, this);
-    if (dialog.exec() != QDialog::Accepted)
-        return;
-    if (dialog.to().isEmpty()) {
-        QMessageBox::warning(this, tr("No recipient"), tr("Who should get this message?"));
-        return;
-    }
-    m_service->sendMessage(dialog.mailboxId(), dialog.to(), dialog.cc(), dialog.subject(),
-                           dialog.bodyText(), QString(), dialog.attachmentData(),
-                           dialog.attachmentNames());
-}
-
-void MainWindow::onSendFinished(bool ok, const QString& error)
-{
-    if (ok) {
-        log(tr("Message sent."));
-        return;
-    }
-    log(tr("Sending failed."));
-    QMessageBox::warning(this, tr("The message was not sent"), error);
-}
-
-void MainWindow::onSearch()
-{
-    rebuildMessageList();
-}
-
-void MainWindow::onOpenWebmail()
-{
-    const QString id = selectedMailboxId();
-    if (id.isEmpty()) {
-        QMessageBox::information(this, tr("No account"),
-                                 tr("Pick one account in the list first."));
-        return;
-    }
-    const Mailbox* mailbox = m_vault->state().mailboxById(id);
-    if (!mailbox)
-        return;
-    const QString url = webmailUrlFor(mailbox->providerId);
-    if (url.isEmpty())
-        return;
-    QDesktopServices::openUrl(QUrl(url));
-}
-
-void MainWindow::onSettings()
-{
-    QDialog dialog(this);
-    dialog.setWindowTitle(tr("Settings"));
-    dialog.resize(600, 460);
-    auto* layout = new QVBoxLayout(&dialog);
-    auto* form = new QFormLayout();
-    layout->addLayout(form);
-
-    form->addRow(new QLabel(tr("The accounts live in the vault:\n%1").arg(m_vault->path()), &dialog));
-
-    for (const QString& providerId : providerIds()) {
-        const Provider* provider = providerById(providerId);
-        auto* clientId = new QLineEdit(
-            m_vault->state().settings.value(providerClientIdKey(providerId)), &dialog);
-        auto* clientSecret = new QLineEdit(
-            m_vault->state().settings.value(providerClientSecretKey(providerId)), &dialog);
-        clientSecret->setEchoMode(QLineEdit::Password);
-        clientId->setToolTip(tr("The client id of your %1 application, see "
-                                "docs/PROVIDER-SETUP.md").arg(provider->name));
-        form->addRow(tr("%1 client id").arg(provider->name), clientId);
-        form->addRow(tr("%1 client secret").arg(provider->name), clientSecret);
-        clientId->setObjectName(QStringLiteral("clientId.%1").arg(providerId));
-        clientSecret->setObjectName(QStringLiteral("clientSecret.%1").arg(providerId));
-    }
-
-    form->addRow(new QLabel(tr("Put this address in the application registration:\n%1")
-                                 .arg(OAuth2::redirectUriForPort(OAuth2::kDefaultLoopbackPort)),
-                             &dialog));
-
-    // A way back in when the master password is lost.
-    auto* recoveryButton = new QPushButton(
-        m_vault->hasRecovery() ? tr("Replace the recovery passphrase")
-                                : tr("Set up a recovery passphrase"), &dialog);
-    recoveryButton->setToolTip(tr("A code you write down. With it the vault can be opened again "
-                                  "when the master password is forgotten."));
-    form->addRow(tr("Recovery"), recoveryButton);
-    connect(recoveryButton, &QPushButton::clicked, &dialog, [this, &dialog]() {
-        const QString passphrase = Vault::makeRecoveryPassphrase();
-        RecoverySetupDialog setup(passphrase, &dialog);
-        setup.exec();
-        QString error;
-        if (!m_vault->createRecovery(passphrase, &error))
-            QMessageBox::warning(&dialog, tr("Could not set up the recovery passphrase"), error);
-    });
-
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
-    layout->addWidget(buttons);
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, [this, &dialog]() {
-        for (const QString& providerId : providerIds()) {
-            auto* clientId = dialog.findChild<QLineEdit*>(QStringLiteral("clientId.%1").arg(providerId));
-            auto* clientSecret = dialog.findChild<QLineEdit*>(QStringLiteral("clientSecret.%1").arg(providerId));
-            if (clientId)
-                m_vault->state().settings[providerClientIdKey(providerId)] = clientId->text().trimmed();
-            if (clientSecret)
-                m_vault->state().settings[providerClientSecretKey(providerId)] = clientSecret->text().trimmed();
-        }
-        QString error;
-        if (!m_vault->save(&error))
-            log(error);
-        dialog.accept();
-    });
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    dialog.exec();
+    rebuildAccounts();
+    rebuildMessages();
 }
 
 } // namespace mmc

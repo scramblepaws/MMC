@@ -27,6 +27,9 @@ public:
     QVector<QByteArray> attachmentData() const;
     QStringList attachmentNames() const;
 
+    void setRecipient(const QString& address);
+    void setSubject(const QString& subject);
+
 private slots:
     void onAddAttachment();
     void onRemoveAttachment();

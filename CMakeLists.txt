@@ -26,7 +26,7 @@ add_library(mmc_core STATIC
     src/net/OAuth2.cpp
     src/net/Providers.cpp
     src/net/MailService.cpp
-    resources/icons.qrc
+    resources/resources.qrc
 )
 target_include_directories(mmc_core PUBLIC src)
 target_link_libraries(mmc_core PUBLIC Qt6::Core Qt6::Gui Qt6::Network Qt6::Concurrent bcrypt)
@@ -36,12 +36,22 @@ target_link_libraries(mmc_core PUBLIC Qt6::Core Qt6::Gui Qt6::Network Qt6::Concu
 # ---------------------------------------------------------------------------
 qt_add_executable(MMC
     src/main.cpp
+    src/ui/Theme.cpp
+    src/ui/Icons.cpp
+    src/ui/IconData.cpp
     src/ui/VaultDialogs.cpp
     src/ui/MainWindow.cpp
     src/ui/MailboxDialog.cpp
     src/ui/ComposeDialog.cpp
+    src/ui/Sidebar.cpp
+    src/ui/MessageList.cpp
+    src/ui/Reader.cpp
+    src/ui/EmptyState.cpp
+    src/ui/Toast.cpp
+    src/ui/SettingsDialog.cpp
+    src/ui/AccountManager.cpp
 )
-target_link_libraries(MMC PRIVATE mmc_core Qt6::Widgets)
+target_link_libraries(MMC PRIVATE mmc_core Qt6::Widgets dwmapi)
 
 # ---------------------------------------------------------------------------
 # tests

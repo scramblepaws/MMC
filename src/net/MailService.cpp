@@ -34,6 +34,23 @@ QString folderKey(const QString& mailboxId, const QString& folder)
     return mailboxId + QChar('|') + folder;
 }
 
+// What a folder is used for, from the flags the server gives.
+QString folderKindFor(const ImapFolderInfo& info)
+{
+    const QString flags = info.flags.join(QChar(' ')).toLower();
+    if (flags.contains(QLatin1String("\\inbox")) || info.name.compare(QLatin1String("INBOX"),
+                                                                     Qt::CaseInsensitive) == 0)
+        return QStringLiteral("inbox");
+    if (flags.contains(QLatin1String("\\sent")))
+        return QStringLiteral("sent");
+    if (flags.contains(QLatin1String("\\drafts")))
+        return QStringLiteral("drafts");
+    if (flags.contains(QLatin1String("\\junk")) || flags.contains(QLatin1String("\\spam")))
+        return QStringLiteral("junk");
+    if (flags.contains(QLatin1String("\\trash")))
+        return QStringLiteral("trash");
+    return QString();
+}
 // Refreshes the access token when it is about to expire.
 bool accessTokenFor(const OAuthToken* token, const Mailbox& mailbox, const Provider& provider,
                     const QMap<QString, QString>& settings, QString* accessToken,
@@ -63,10 +80,13 @@ bool accessTokenFor(const OAuthToken* token, const Mailbox& mailbox, const Provi
 }
 
 SyncOutcome runSync(const VaultState& state, const QMap<QString, QString>& settings,
-                    const QString& mailboxId)
+                    const QString& mailboxId, const QString& folderName,
+                    const QString& folderKind)
 {
     SyncOutcome outcome;
     outcome.mailboxId = mailboxId;
+    outcome.folderName = folderName;
+    outcome.folderKind = folderKind;
 
     const Mailbox* mailbox = state.mailboxById(mailboxId);
     if (!mailbox) {
@@ -102,7 +122,7 @@ SyncOutcome runSync(const VaultState& state, const QMap<QString, QString>& setti
     }
 
     ImapFolderStatus status;
-    if (!client.status(QStringLiteral("INBOX"), &status, &error)) {
+    if (!client.status(folderName, &status, &error)) {
         outcome.error = error;
         return outcome;
     }
@@ -111,10 +131,10 @@ SyncOutcome runSync(const VaultState& state, const QMap<QString, QString>& setti
 
     qint64 since = 0;
     for (const Folder& f : state.folders)
-        if (f.mailboxId == mailboxId && f.name == QLatin1String("INBOX"))
+        if (f.mailboxId == mailboxId && f.name == folderName)
             since = f.uidNext;
 
-    if (!client.fetchHeaders(QStringLiteral("INBOX"), since, &outcome.headers, &error)) {
+    if (!client.fetchHeaders(folderName, since, &outcome.headers, &error)) {
         outcome.error = error;
         return outcome;
     }
@@ -204,6 +224,18 @@ MailService::MailService(Vault* vault, QObject* parent)
 
 void MailService::syncMailbox(const QString& mailboxId)
 {
+    syncFolderInternal(mailboxId, QStringLiteral("INBOX"), QStringLiteral("inbox"));
+}
+
+void MailService::syncFolder(const QString& mailboxId, const QString& folderName,
+                             const QString& folderKind)
+{
+    syncFolderInternal(mailboxId, folderName, folderKind);
+}
+
+void MailService::syncFolderInternal(const QString& mailboxId, const QString& folderName,
+                                      const QString& folderKind)
+{
     if (!m_vault)
         return;
     emit syncStarted(mailboxId);
@@ -242,18 +274,19 @@ void MailService::syncMailbox(const QString& mailboxId)
                     fresh.mailboxId = mailboxId;
                     fresh.name = info.name;
                     fresh.delimiter = info.delimiter;
+                    fresh.kind = folderKindFor(info);
                     state.folders.append(fresh);
                     folder = state.folderById(id);
                 }
-                if (folder && info.name == QLatin1String("INBOX"))
+                if (folder && info.name == outcome.folderName)
                     folder->uidNext = outcome.uidNext;
             }
 
-            // Merge the new headers, newest first.
-            const QString folderId = mailboxId + QChar('|') + QStringLiteral("INBOX");
+            // Merge the new headers.
+            const QString folderId = mailboxId + QChar('|') + outcome.folderName;
             for (const ImapHeader& header : outcome.headers) {
                 Message message;
-                message.id = mailboxId + QChar('|') + QStringLiteral("INBOX") + QChar('|') + header.uid;
+                message.id = folderId + QChar('|') + header.uid;
                 message.mailboxId = mailboxId;
                 message.folderId = folderId;
                 message.uid = header.uid;
@@ -264,6 +297,8 @@ void MailService::syncMailbox(const QString& mailboxId)
                 message.date = QDateTime::fromString(header.date, Qt::RFC2822Date);
                 message.size = header.size;
                 message.flags = header.flags;
+                message.preview = header.snippet;
+                message.folderKind = outcome.folderKind;
 
                 int existing = -1;
                 for (int i = 0; i < state.messages.size(); ++i) {
@@ -287,7 +322,10 @@ void MailService::syncMailbox(const QString& mailboxId)
                     state.messages.remove(i);
             }
 
-            state.settings[QStringLiteral("unseen.%1").arg(mailboxId)] = QString::number(outcome.unseen);
+            if (outcome.folderKind == QLatin1String("inbox")) {
+                state.settings[QStringLiteral("unseen.%1").arg(mailboxId)] =
+                    QString::number(outcome.unseen);
+            }
         }
 
         QString error;
@@ -295,8 +333,8 @@ void MailService::syncMailbox(const QString& mailboxId)
         emit syncFinished(mailboxId, outcome.ok, outcome.error);
     });
 
-    watcher->setFuture(QtConcurrent::run([state, settings, mailboxId]() {
-        return runSync(state, settings, mailboxId);
+    watcher->setFuture(QtConcurrent::run([state, settings, mailboxId, folderName, folderKind]() {
+        return runSync(state, settings, mailboxId, folderName, folderKind);
     }));
 }
 

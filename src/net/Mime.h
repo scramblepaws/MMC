@@ -34,6 +34,16 @@ ParsedMessage parseMime(const QByteArray& raw);
 // Decodes RFC 2047 encoded words in a header value ("=?UTF-8?B?...?=").
 QString decodeHeaderValue(const QString& value);
 
+// "Someone <someone@gmail.com>" becomes "Someone".
+QString senderName(const QString& from);
+
+// Makes the html of a mail safe to show: no scripts, no event handlers, and
+// no pictures from the internet unless that is wanted.
+QString sanitizeMailHtml(const QString& html, bool allowRemoteImages);
+
+// The first words of a mail, for the line under the subject.
+QString snippetFromBody(const QByteArray& body);
+
 struct OutgoingAttachment {
     QString filename;
     QByteArray data;

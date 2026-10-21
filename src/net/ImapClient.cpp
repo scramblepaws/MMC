@@ -6,6 +6,8 @@
 #include <QSslSocket>
 #include <QRegularExpression>
 
+#include "net/Mime.h"
+
 namespace mmc {
 namespace {
 
@@ -457,7 +459,8 @@ bool ImapClient::fetchHeaders(const QString& folder, qint64 sinceUid,
         range = QByteArray::number(sinceUid + 1) + ":*";
     const QByteArray cmd = QByteArrayLiteral("UID FETCH ") + range
                            + QByteArrayLiteral(" (UID FLAGS RFC822.SIZE "
-                                               "BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])");
+                                               "BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)] "
+                                               "BODY.PEEK[1]<0.300>)");
     if (!command(cmd, &untagged, nullptr, error))
         return false;
 
@@ -476,7 +479,7 @@ bool ImapClient::fetchHeaders(const QString& folder, qint64 sinceUid,
         header.size = nodeValue(items, "RFC822.SIZE").toInt();
 
         if (!r.literals.isEmpty()) {
-            const QByteArray raw = r.literals.last();
+            const QByteArray raw = r.literals.at(0);
             const QList<QByteArray> lines = raw.split('\n');
             for (const QByteArray& line : lines) {
                 const int colon = line.indexOf(':');
@@ -491,6 +494,9 @@ bool ImapClient::fetchHeaders(const QString& folder, qint64 sinceUid,
                 else if (key == QLatin1String("message-id")) header.messageId = value;
             }
         }
+        // The second literal holds the first words of the mail.
+        if (r.literals.size() > 1)
+            header.snippet = snippetFromBody(r.literals.at(1));
         if (!header.uid.isEmpty())
             headers->append(header);
     }

@@ -302,9 +302,9 @@ void Sidebar::setAccounts(const QList<Mailbox*>& accounts)
                                                                        : mailbox->displayName);
         item->setData(Qt::UserRole + 4, mailbox->address);
         item->setToolTip(mailbox->address);
-        if (current == mailbox->id)
-            m_accounts->setCurrentItem(item);
     }
+    // No account is picked at the start, the list shows the mail of all of them.
+    m_accounts->clearSelection();
 }
 
 void Sidebar::setUnread(const QString& mailboxId, int count)

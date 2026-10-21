@@ -209,6 +209,7 @@ void Reader::showMessage(const Message& message, const ParsedMessage& parsed)
     m_emptyPage->setVisible(false);
     m_errorPage->setVisible(false);
     m_messagePage->setVisible(true);
+    m_pages->setCurrentWidget(m_messagePage);
 }
 
 void Reader::showEmpty()
@@ -216,6 +217,7 @@ void Reader::showEmpty()
     m_emptyPage->setVisible(true);
     m_errorPage->setVisible(false);
     m_messagePage->setVisible(false);
+    m_pages->setCurrentWidget(m_emptyPage);
 }
 
 void Reader::showError(const QString& title, const QString& text, const std::function<void()>& retry)
@@ -223,6 +225,7 @@ void Reader::showError(const QString& title, const QString& text, const std::fun
     m_errorPage->setVisible(true);
     m_emptyPage->setVisible(false);
     m_messagePage->setVisible(false);
+    m_pages->setCurrentWidget(m_errorPage);
     m_errorPage->setTitle(title);
     m_errorPage->setText(text);
     if (retry)

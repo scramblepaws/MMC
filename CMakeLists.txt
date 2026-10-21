@@ -20,6 +20,8 @@ add_library(mmc_core STATIC
     src/core/Vault.cpp
     src/core/Importer.cpp
     src/core/ProviderIcons.cpp
+    src/ui/Icons.cpp
+    src/ui/IconData.cpp
     src/net/Mime.cpp
     src/net/ImapClient.cpp
     src/net/SmtpClient.cpp
@@ -37,8 +39,6 @@ target_link_libraries(mmc_core PUBLIC Qt6::Core Qt6::Gui Qt6::Network Qt6::Concu
 qt_add_executable(MMC
     src/main.cpp
     src/ui/Theme.cpp
-    src/ui/Icons.cpp
-    src/ui/IconData.cpp
     src/ui/VaultDialogs.cpp
     src/ui/MainWindow.cpp
     src/ui/MailboxDialog.cpp

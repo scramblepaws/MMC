@@ -4,6 +4,7 @@
 
 #include <QHash>
 #include <QGuiApplication>
+#include <QImage>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPen>
@@ -170,6 +171,8 @@ public:
 
     bool atEnd() const { return m_position >= m_data.size(); }
 
+    int position() const { return m_position; }
+
     void skipSeparators()
     {
         while (m_position < m_data.size()
@@ -181,6 +184,16 @@ public:
     }
 
     bool hasNumber()
+    {
+        skipSeparators();
+        if (m_position >= m_data.size())
+            return false;
+        const char ch = m_data.at(m_position);
+        return (ch >= '0' && ch <= '9') || ch == '-' || ch == '+' || ch == '.';
+    }
+
+    // True when the next thing in the data is a number and not a command.
+    bool nextIsNumber()
     {
         skipSeparators();
         if (m_position >= m_data.size())
@@ -243,14 +256,29 @@ QPainterPath pathFromData(const QByteArray& data)
     Scanner scanner(data);
     QPointF current;
     QPointF start;
-    char previous = 0;
+    char previous = 0;   // the command that was used, with its case
 
     while (!scanner.atEnd()) {
-        const char command = scanner.command();
+        const int before = scanner.position();
+        // A number where a command should be means the last command is
+        // repeated: "M 1 2 3 4" is a move and then a line.
+        char command = 0;
+        if (scanner.nextIsNumber() && previous != 0) {
+            command = previous;
+            if (command == 'M')
+                command = 'L';
+            else if (command == 'm')
+                command = 'l';
+        } else {
+            command = scanner.command();
+        }
         if (command == 0)
             break;
         const bool relative = (command >= 'a' && command <= 'z');
         const char upper = relative ? static_cast<char>(command - 'a' + 'A') : command;
+        const char previousUpper = (previous >= 'a' && previous <= 'z')
+                                       ? static_cast<char>(previous - 'a' + 'A')
+                                       : previous;
 
         auto point = [&](double x, double y) {
             return relative ? QPointF(current.x() + x, current.y() + y) : QPointF(x, y);
@@ -300,7 +328,7 @@ QPainterPath pathFromData(const QByteArray& data)
             const double x2 = scanner.number(), y2 = scanner.number();
             const double x = scanner.number(), y = scanner.number();
             QPointF control1 = builder.subControl();
-            if (previous != 'C' && previous != 'S')
+            if (previousUpper != 'C' && previousUpper != 'S')
                 control1 = current;
             else
                 control1 = QPointF(2 * current.x() - control1.x(), 2 * current.y() - control1.y());
@@ -322,7 +350,7 @@ QPainterPath pathFromData(const QByteArray& data)
         case 'T': {
             const double x = scanner.number(), y = scanner.number();
             QPointF control = builder.subControl();
-            if (previous != 'Q' && previous != 'T')
+            if (previousUpper != 'Q' && previousUpper != 'T')
                 control = current;
             else
                 control = QPointF(2 * current.x() - control.x(), 2 * current.y() - control.y());
@@ -352,7 +380,11 @@ QPainterPath pathFromData(const QByteArray& data)
         default:
             break;
         }
-        previous = upper;
+        previous = command;
+        if (scanner.position() == before) {
+            // Nothing was read, stop instead of going round for ever.
+            break;
+        }
     }
     return builder.path();
 }
@@ -432,6 +464,14 @@ QStringList Icons::names()
 
 QPixmap Icons::pixmap(const QString& name, const QColor& colour, int size)
 {
+    const QImage picture = image(name, colour, size);
+    if (picture.isNull())
+        return {};
+    return QPixmap::fromImage(picture);
+}
+
+QImage Icons::image(const QString& name, const QColor& colour, int size)
+{
     const IconData* icon = findIcon(name);
     if (!icon || size <= 0)
         return {};
@@ -439,7 +479,7 @@ QPixmap Icons::pixmap(const QString& name, const QColor& colour, int size)
     // The drawing is done on a bigger canvas and scaled down, so the lines
     // stay smooth.
     const int factor = 2;
-    QPixmap canvas(size * factor, size * factor);
+    QImage canvas(size * factor, size * factor, QImage::Format_ARGB32_Premultiplied);
     canvas.fill(Qt::transparent);
 
     QPainter painter(&canvas);
@@ -454,7 +494,8 @@ QPixmap Icons::pixmap(const QString& name, const QColor& colour, int size)
 
     for (int i = 0; i < icon->shapeCount; ++i) {
         const IconShapeData& shape = icon->shapes[i];
-        painter.drawPath(shapeToPath(shape.kind, QByteArray(shape.data)));
+        const QPainterPath path = shapeToPath(shape.kind, QByteArray(shape.data));
+        painter.drawPath(path);
     }
     painter.end();
 

@@ -2,10 +2,13 @@
 #include <QDataStream>
 #include <QDateTime>
 #include <QFile>
+#include <QImage>
+#include <QPainter>
 #include <QUuid>
 #include <cstdio>
 
 #include "core/Vault.h"
+#include "ui/Icons.h"
 #include "test_harness.h"
 
 void test_crypto(TestRunner& runner);
@@ -177,6 +180,34 @@ int main(int argc, char** argv)
                                                           QString::fromLocal8Bit(argv[4]), &error);
         std::printf("reset: %s %s\n", ok ? "yes" : "no", qPrintable(error));
         return ok ? 0 : 1;
+    }
+
+    // Draw all the icons on one sheet, to look at them.
+    if (argc >= 3 && QString::fromLatin1(argv[1]) == QLatin1String("--icon-sheet")) {
+        const QStringList names = mmc::Icons::names();
+        const int cell = 64;
+        const int columns = 6;
+        const int rows = (names.size() + columns - 1) / columns;
+        QImage sheet(columns * cell, rows * cell, QImage::Format_ARGB32);
+        sheet.fill(QColor(0x14, 0x17, 0x1E));
+        QPainter painter(&sheet);
+        QFont font = QFont("Segoe UI", 6);
+        painter.setFont(font);
+        painter.setPen(QColor(0x71, 0x79, 0x8B));
+        for (int i = 0; i < names.size(); ++i) {
+            const int x = (i % columns) * cell;
+            const int y = (i / columns) * cell;
+            const QImage icon = mmc::Icons::image(names.at(i), QColor(0xF2, 0xF3, 0xF7), 44);
+            painter.drawImage(x + 9, y + 2, icon);
+            // no text, there is no window system in the test program
+        }
+        painter.end();
+        if (!sheet.save(QString::fromLocal8Bit(argv[2]))) {
+            std::printf("could not write the sheet\n");
+            return 1;
+        }
+        std::printf("wrote %s with %d icons\n", argv[2], int(names.size()));
+        return 0;
     }
 
     QCoreApplication app(argc, argv);
